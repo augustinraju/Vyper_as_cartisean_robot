@@ -211,4 +211,7 @@ void GcodeSuite::M114() {
 
   TERN_(M114_LEGACY, planner.synchronize());
   report_current_position_projected();
+  #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+    stepper.report_dual_x_positions();
+  #endif
 }

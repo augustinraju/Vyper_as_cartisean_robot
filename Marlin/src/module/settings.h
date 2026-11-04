@@ -64,6 +64,9 @@ class MarlinSettings {
         if (!loaded && load()) loaded = true;
       }
 
+      static void restore_last_position();   // Apply the position saved before the last power-off (after first_load)
+      static void save_position_if_moved();  // Save the position to EEPROM once the gantry has stopped
+
       #if ENABLED(AUTO_BED_LEVELING_UBL) // Eventually make these available if any leveling system
                                          // That can store is enabled
         static uint16_t meshes_start_index();

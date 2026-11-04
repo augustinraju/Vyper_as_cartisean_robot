@@ -793,6 +793,8 @@ private:
 
   TERN_(HAS_DUPLICATION_MODE, static void M605());
 
+  TERN_(X_DUAL_STEPPER_DRIVERS, static void M606());
+
   TERN_(IS_KINEMATIC, static void M665());
 
   #if ENABLED(DELTA) || HAS_EXTRA_ENDSTOPS

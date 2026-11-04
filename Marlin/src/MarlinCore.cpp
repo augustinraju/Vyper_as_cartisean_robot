@@ -1160,6 +1160,7 @@ void setup() {
   SETUP_RUN(endstops.init());         // Init endstops and pullups
 
   SETUP_RUN(stepper.init());          // Init stepper. This enables interrupts!
+  TERN_(EEPROM_SETTINGS, settings.restore_last_position()); // Resume from the last-known position
 
   #if HAS_SERVOS
     SETUP_RUN(servo_init());
@@ -1368,6 +1369,8 @@ void setup() {
 void loop() {
   do {
     idle();
+
+    TERN_(EEPROM_SETTINGS, settings.save_position_if_moved());
 
     #if ENABLED(SDSUPPORT)
       if (card.flag.abort_sd_printing) abortSDPrinting();

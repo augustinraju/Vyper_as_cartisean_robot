@@ -71,7 +71,9 @@ void GcodeSuite::G92() {
                       v = i == E_AXIS ? l : LOGICAL_TO_NATIVE(l, i),
                       d = v - current_position[i];
           if (!NEAR_ZERO(d)) {
-            #if IS_SCARA || !HAS_POSITION_SHIFT
+            // X_DUAL_STEPPER_DRIVERS (no endstops): G92 sets the raw position so the
+            // stepper counters (X1/X2) and the software limits are re-referenced.
+            #if IS_SCARA || !HAS_POSITION_SHIFT || ENABLED(X_DUAL_STEPPER_DRIVERS)
               if (i == E_AXIS) sync_E = true; else sync_XYZ = true;
               current_position[i] = v;        // Without workspaces revert to Marlin 1.0 behavior
             #elif HAS_POSITION_SHIFT

@@ -133,7 +133,7 @@ Stepper stepper; // Singleton
 
 // public:
 
-#if EITHER(HAS_EXTRA_ENDSTOPS, Z_STEPPER_AUTO_ALIGN)
+#if ANY(HAS_EXTRA_ENDSTOPS, Z_STEPPER_AUTO_ALIGN, X_DUAL_STEPPER_DRIVERS)
   bool Stepper::separate_multi_axis = false;
 #endif
 
@@ -158,7 +158,7 @@ bool Stepper::abort_current_block;
   uint8_t Stepper::last_moved_extruder = 0xFF;
 #endif
 
-#if ENABLED(X_DUAL_ENDSTOPS)
+#if EITHER(X_DUAL_ENDSTOPS, X_DUAL_STEPPER_DRIVERS)
   bool Stepper::locked_X_motor = false, Stepper::locked_X2_motor = false;
 #endif
 #if ENABLED(Y_DUAL_ENDSTOPS)
@@ -237,6 +237,9 @@ int32_t Stepper::ticks_nominal = -1;
 
 xyz_long_t Stepper::endstops_trigsteps;
 xyze_long_t Stepper::count_position{0};
+#if ENABLED(X_DUAL_STEPPER_DRIVERS)
+  int32_t Stepper::count_position_x1 = 0, Stepper::count_position_x2 = 0;
+#endif
 xyze_int8_t Stepper::count_direction{0};
 
 #if ENABLED(LASER_POWER_INLINE_TRAPEZOID)
@@ -351,12 +354,14 @@ xyze_int8_t Stepper::count_direction{0};
   #if ENABLED(X_DUAL_ENDSTOPS)
     #define X_APPLY_STEP(v,Q) DUAL_ENDSTOP_APPLY_STEP(X,v)
   #else
-    #define X_APPLY_STEP(v,Q) do{ X_STEP_WRITE(v); X2_STEP_WRITE(v); }while(0)
+    // Honors locked_X_motor / locked_X2_motor when separate_multi_axis is set (M606 S1)
+    #define X_APPLY_STEP(v,Q) do{ DUAL_SEPARATE_APPLY_STEP(X,v) }while(0)
   #endif
 #elif ENABLED(DUAL_X_CARRIAGE)
+  // INVERT_X2_VS_X_DIR flips the X2 direction signal when the X2 motor is wired reversed.
   #define X_APPLY_DIR(v,ALWAYS) do{ \
-    if (extruder_duplication_enabled || ALWAYS) { X_DIR_WRITE(v); X2_DIR_WRITE((v) ^ idex_mirrored_mode); } \
-    else if (last_moved_extruder) X2_DIR_WRITE(v); else X_DIR_WRITE(v); \
+    if (extruder_duplication_enabled || ALWAYS) { X_DIR_WRITE(v); X2_DIR_WRITE((v) ^ idex_mirrored_mode ^ ENABLED(INVERT_X2_VS_X_DIR)); } \
+    else if (last_moved_extruder) X2_DIR_WRITE((v) ^ ENABLED(INVERT_X2_VS_X_DIR)); else X_DIR_WRITE(v); \
   }while(0)
   #define X_APPLY_STEP(v,ALWAYS) do{ \
     if (extruder_duplication_enabled || ALWAYS) { X_STEP_WRITE(v); X2_STEP_WRITE(v); } \
@@ -505,6 +510,12 @@ void Stepper::set_directions() {
       }
     #endif
   #endif // !LIN_ADVANCE
+
+  #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+    // X2_DIR_PIN is the same pin as E0_DIR_PIN on this board, so the E0 direction written above
+    // overwrote X2. Re-apply the X2 direction from the X axis direction.
+    X2_DIR_WRITE((motor_direction(X_AXIS) ? INVERT_X_DIR : !INVERT_X_DIR) ^ ENABLED(INVERT_X2_VS_X_DIR));
+  #endif
 
   #if HAS_L64XX
     if (L64XX_OK_to_power_up) { // OK to send the direction commands (which powers up the L64XX steppers)
@@ -1549,12 +1560,23 @@ void Stepper::pulse_phase_isr() {
     #define _APPLY_STEP(AXIS, INV, ALWAYS) AXIS ##_APPLY_STEP(INV, ALWAYS)
     #define _INVERT_STEP_PIN(AXIS) INVERT_## AXIS ##_STEP_PIN
 
+    #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+      // Advance each X motor's own count, skipping a motor that M606 has locked
+      #define COUNT_DUAL_X_STEP(AXIS) do{ if (_AXIS(AXIS) == X_AXIS) { \
+        if (!(separate_multi_axis && locked_X_motor))  count_position_x1 += count_direction[X_AXIS]; \
+        if (!(separate_multi_axis && locked_X2_motor)) count_position_x2 += count_direction[X_AXIS]; \
+      } }while(0)
+    #else
+      #define COUNT_DUAL_X_STEP(AXIS) do{}while(0)
+    #endif
+
     // Determine if a pulse is needed using Bresenham
     #define PULSE_PREP(AXIS) do{ \
       delta_error[_AXIS(AXIS)] += advance_dividend[_AXIS(AXIS)]; \
       step_needed[_AXIS(AXIS)] = (delta_error[_AXIS(AXIS)] >= 0); \
       if (step_needed[_AXIS(AXIS)]) { \
         count_position[_AXIS(AXIS)] += count_direction[_AXIS(AXIS)]; \
+        COUNT_DUAL_X_STEP(AXIS); \
         delta_error[_AXIS(AXIS)] -= advance_divisor; \
       } \
     }while(0)
@@ -2619,6 +2641,9 @@ void Stepper::_set_position(const int32_t &a, const int32_t &b, const int32_t &c
     count_position.set(a, b, c);
   #endif
   count_position.e = e;
+  #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+    count_position_x1 = count_position_x2 = count_position.x;
+  #endif
 }
 
 /**
@@ -2658,6 +2683,9 @@ void Stepper::set_axis_position(const AxisEnum a, const int32_t &v) {
   #endif
 
   count_position[a] = v;
+  #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+    if (a == X_AXIS) count_position_x1 = count_position_x2 = v;
+  #endif
 
   #ifdef __AVR__
     // Reenable Stepper ISR
@@ -2740,6 +2768,22 @@ void Stepper::report_positions() {
 
   report_a_position(pos);
 }
+
+#if ENABLED(X_DUAL_STEPPER_DRIVERS)
+  // Report each X motor's step count in mm (used by M114)
+  void Stepper::report_dual_x_positions() {
+    const float spmm = planner.settings.axis_steps_per_mm[X_AXIS];
+    SERIAL_ECHOLNPAIR("X1:", count_position_x1 / spmm, " X2:", count_position_x2 / spmm);
+  }
+
+  float Stepper::get_x2_position_mm() {
+    return float(count_position_x2) / planner.settings.axis_steps_per_mm[X_AXIS];
+  }
+
+  void Stepper::set_x2_position_mm(const float &mm) {
+    count_position_x2 = int32_t(mm * planner.settings.axis_steps_per_mm[X_AXIS]);
+  }
+#endif
 
 #if ENABLED(BABYSTEPPING)
 

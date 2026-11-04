@@ -241,7 +241,7 @@ class Stepper {
 
   public:
 
-    #if EITHER(HAS_EXTRA_ENDSTOPS, Z_STEPPER_AUTO_ALIGN)
+    #if ANY(HAS_EXTRA_ENDSTOPS, Z_STEPPER_AUTO_ALIGN, X_DUAL_STEPPER_DRIVERS)
       static bool separate_multi_axis;
     #endif
 
@@ -275,7 +275,7 @@ class Stepper {
 
     static bool abort_current_block;        // Signals to the stepper that current block should be aborted
 
-    #if ENABLED(X_DUAL_ENDSTOPS)
+    #if EITHER(X_DUAL_ENDSTOPS, X_DUAL_STEPPER_DRIVERS)
       static bool locked_X_motor, locked_X2_motor;
     #endif
     #if ENABLED(Y_DUAL_ENDSTOPS)
@@ -355,6 +355,11 @@ class Stepper {
 
     // Positions of stepper motors, in step units
     static xyze_long_t count_position;
+
+    #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+      // Step count of each X motor. Only advances while that motor is not locked (M606 S1)
+      static int32_t count_position_x1, count_position_x2;
+    #endif
 
     // Current stepper motor directions (+1 or -1)
     static xyze_int8_t count_direction;
@@ -436,6 +441,11 @@ class Stepper {
     // Report the positions of the steppers, in steps
     static void report_a_position(const xyz_long_t &pos);
     static void report_positions();
+    #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+      static void report_dual_x_positions();
+      static float get_x2_position_mm();            // X2 motor position (mm), for EEPROM save
+      static void set_x2_position_mm(const float &mm); // Set X2 motor position (mm), for boot restore
+    #endif
 
     // Discard current block and free any resources
     FORCE_INLINE static void discard_current_block() {
@@ -474,10 +484,10 @@ class Stepper {
       static void microstep_readings();
     #endif
 
-    #if EITHER(HAS_EXTRA_ENDSTOPS, Z_STEPPER_AUTO_ALIGN)
+    #if ANY(HAS_EXTRA_ENDSTOPS, Z_STEPPER_AUTO_ALIGN, X_DUAL_STEPPER_DRIVERS)
       FORCE_INLINE static void set_separate_multi_axis(const bool state) { separate_multi_axis = state; }
     #endif
-    #if ENABLED(X_DUAL_ENDSTOPS)
+    #if EITHER(X_DUAL_ENDSTOPS, X_DUAL_STEPPER_DRIVERS)
       FORCE_INLINE static void set_x_lock(const bool state) { locked_X_motor = state; }
       FORCE_INLINE static void set_x2_lock(const bool state) { locked_X2_motor = state; }
     #endif

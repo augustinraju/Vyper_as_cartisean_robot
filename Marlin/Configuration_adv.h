@@ -550,14 +550,25 @@
  * in X2. Dual endstop offsets can be set at runtime with 'M666 X<offset> Y<offset> Z<offset>'.
  */
 
-//#define X_DUAL_STEPPER_DRIVERS
+// Enabled: X1 and X2 move together on every X move (no homing or duplication mode needed).
+// Requires DUAL_X_CARRIAGE to be disabled (SanityCheck.h).
+#define X_DUAL_STEPPER_DRIVERS
 #if ENABLED(X_DUAL_STEPPER_DRIVERS)
-  //#define INVERT_X2_VS_X_DIR    // Enable if X2 direction signal is opposite to X
+  #define INVERT_X2_VS_X_DIR    // Enable if X2 direction signal is opposite to X
   //#define X_DUAL_ENDSTOPS
   #if ENABLED(X_DUAL_ENDSTOPS)
     #define X2_USE_ENDSTOP _XMAX_
     #define X2_ENDSTOP_ADJUSTMENT  0
   #endif
+
+  // X2 uses the E0 driver (extension-cable port); Z2 uses the E1 driver (ZR connector).
+  // Z1 pins are untouched.
+  #define X2_STEP_PIN    E0_STEP_PIN
+  #define X2_DIR_PIN     E0_DIR_PIN
+  #define X2_ENABLE_PIN  E0_ENABLE_PIN
+  #define Z2_STEP_PIN    E1_STEP_PIN
+  #define Z2_DIR_PIN     E1_DIR_PIN
+  #define Z2_ENABLE_PIN  E1_ENABLE_PIN
 #endif
 
 //#define Y_DUAL_STEPPER_DRIVERS
@@ -576,12 +587,19 @@
 #define NUM_Z_STEPPER_DRIVERS 2   // (1-4) Z options change based on how many
 
 #if NUM_Z_STEPPER_DRIVERS > 1
+  // Z2 uses the E1 driver (ZR connector). Z1 pins are untouched.
+  #define Z2_STEP_PIN    E1_STEP_PIN
+  #define Z2_DIR_PIN     E1_DIR_PIN
+  #define Z2_ENABLE_PIN  E1_ENABLE_PIN
+
   // Enable if Z motor direction signals are the opposite of Z1
   //#define INVERT_Z2_VS_Z_DIR
   //#define INVERT_Z3_VS_Z_DIR
   //#define INVERT_Z4_VS_Z_DIR
 
-  #define Z_MULTI_ENDSTOPS
+  // Disabled: the Z2 endstop (ZR_STOP) shares the X-MAX pin (PC6), which DUAL_X_CARRIAGE needs for X2 homing.
+  // Z2 still moves with Z1, but Z homes on Z1 (ZL) only.
+  //#define Z_MULTI_ENDSTOPS
   #if ENABLED(Z_MULTI_ENDSTOPS)
     #define Z2_USE_ENDSTOP          _XMAX_
     #define Z2_ENDSTOP_ADJUSTMENT   0
@@ -624,12 +642,20 @@
  *       Set the initial X offset and temperature differential with M605 S2 X[offs] R[deg] and
  *       follow with M605 S3 to initiate mirrored movement.
  */
+// Disabled: incompatible with X_DUAL_STEPPER_DRIVERS (SanityCheck.h).
+// Re-enable only if you need independent X carriages (requires homing for simultaneous X).
 //#define DUAL_X_CARRIAGE
 #if ENABLED(DUAL_X_CARRIAGE)
+  // X2 is the second X motor (gripper arm 2), driven from the E0 driver port.
+  #define X2_STEP_PIN    E0_STEP_PIN
+  #define X2_DIR_PIN     E0_DIR_PIN
+  #define X2_ENABLE_PIN  E0_ENABLE_PIN
+  #define INVERT_X2_VS_X_DIR  // Enable if X2 direction signal is opposite to X (motor wired reversed via JTAG)
+
   #define X1_MIN_POS X_MIN_POS   // Set to X_MIN_POS
   #define X1_MAX_POS X_BED_SIZE  // Set a maximum so the first X-carriage can't hit the parked second X-carriage
   #define X2_MIN_POS    80       // Set a minimum to ensure the  second X-carriage can't hit the parked first X-carriage
-  #define X2_MAX_POS   353       // Set this to the distance between toolheads when both heads are homed
+  #define X2_MAX_POS   353       // Set this to the distance between toolheads when both heads are homed (MEASURE for your gripper)
   #define X2_HOME_DIR    1       // Set to 1. The second X-carriage always homes to the maximum endstop position
   #define X2_HOME_POS X2_MAX_POS // Default X2 home position. Set to X2_MAX_POS.
                       // However: In this mode the HOTEND_OFFSET_X value for the second extruder provides a software
@@ -638,7 +664,9 @@
                       // Remember: you should set the second extruder x-offset to 0 in your slicer.
 
   // This is the default power-up mode which can be later using M605.
-  #define DEFAULT_DUAL_X_CARRIAGE_MODE DXC_AUTO_PARK_MODE
+  // Duplication mode at power-up so G1 X moves drive both X motors together (normal X behavior).
+  // Use M605 S0 for independent control (T0/T1 select which motor a G1 X move drives).
+  #define DEFAULT_DUAL_X_CARRIAGE_MODE DXC_DUPLICATION_MODE // was DXC_AUTO_PARK_MODE
 
   // Default x offset in duplication mode (typically set to half print bed width)
   #define DEFAULT_DUPLICATION_X_OFFSET 100
@@ -1479,7 +1507,7 @@
   //#define STATUS_ALT_FAN_BITMAP     // Use the alternative fan bitmap
   //#define STATUS_FAN_FRAMES 3       // :[0,1,2,3,4] Number of fan animation frames
   //#define STATUS_HEAT_PERCENT       // Show heating in a progress bar
-  //#define BOOT_MARLIN_LOGO_ANIMATED // Animated Marlin logo. Costs ~â€?260 (or ~940) bytes of PROGMEM.
+  //#define BOOT_MARLIN_LOGO_ANIMATED // Animated Marlin logo. Costs ~ï¿½?260 (or ~940) bytes of PROGMEM.
 
   // Frivolous Game Options
   //#define MARLIN_BRICKOUT
@@ -1687,7 +1715,7 @@
   //#define BABYSTEP_DISPLAY_TOTAL          // Display total babysteps since last G28
   #define BABYSTEP_DISPLAY_TOTAL          // Display total babysteps since last G28
   //#define BABYSTEP_ZPROBE_OFFSET          // Combine M851 Z and Babystepping
-  #define BABYSTEP_ZPROBE_OFFSET          // Combine M851 Z and Babystepping
+  //#define BABYSTEP_ZPROBE_OFFSET          // Combine M851 Z and Babystepping
   #if ENABLED(BABYSTEP_ZPROBE_OFFSET)
     //#define BABYSTEP_HOTEND_Z_OFFSET      // For multiple hotends, babystep relative Z offsets
     //#define BABYSTEP_ZPROBE_GFX_OVERLAY   // Enable graphical overlay on Z-offset editor
@@ -2152,7 +2180,7 @@
  * Requires NOZZLE_PARK_FEATURE.
  * This feature is required for the default FILAMENT_RUNOUT_SCRIPT.
  */
-#define ADVANCED_PAUSE_FEATURE
+//#define ADVANCED_PAUSE_FEATURE
 #if ENABLED(ADVANCED_PAUSE_FEATURE)
   #define PAUSE_PARK_RETRACT_FEEDRATE         60  // (mm/s) Initial retract feedrate.
   #define PAUSE_PARK_RETRACT_LENGTH            2  // (mm) Initial retract.

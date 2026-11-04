@@ -788,6 +788,10 @@ void GcodeSuite::process_parsed_command(const bool no_ok/*=false*/) {
         case 605: M605(); break;                                  // M605: Set Dual X Carriage movement mode
       #endif
 
+      #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+        case 606: M606(); break;                                  // M606: Select X motor(s) to move
+      #endif
+
       #if ENABLED(DELTA)
         case 665: M665(); break;                                  // M665: Set delta configurations
       #endif

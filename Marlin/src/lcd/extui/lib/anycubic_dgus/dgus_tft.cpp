@@ -449,6 +449,15 @@ namespace Anycubic {
     }
   }
 
+  // Heater max limits are undefined when the heater is disabled in Configuration.h.
+  // A limit of 0 keeps the target at 0 (heater off).
+  #if !HAS_TEMP_HOTEND
+    #define HEATER_0_MAXTEMP 0
+  #endif
+  #if !HAS_TEMP_BED
+    #define BED_MAXTEMP 0
+  #endif
+
   void DgusTFT::FilamentRunout()  {
     #if ACDEBUG(AC_MARLIN)
       SERIAL_ECHOLNPAIR("FilamentRunout() printer_state ", printer_state);
@@ -457,11 +466,14 @@ namespace Anycubic {
 //    SendtoTFTLN(isPrintingFromMedia() ? AC_msg_filament_out_alert : AC_msg_filament_out_block);
 //    printer_state = AC_printer_filament_out;
 
+      #if HAS_FILAMENT_SENSOR
       SERIAL_ECHOLNPAIR("getFilamentRunoutState: ", getFilamentRunoutState());
+      #endif
     #endif
 
     pop_up_index = 15;  // show filament lack.
     
+    #if HAS_FILAMENT_SENSOR
     if(READ(FIL_RUNOUT_PIN) == FIL_RUNOUT_STATE) {
       PlayTune(BEEPER_PIN, FilamentOut, 1);
 
@@ -473,6 +485,7 @@ namespace Anycubic {
         pause_state = AC_paused_filament_lack;
       }
     }
+    #endif
   }
 
   void DgusTFT::ConfirmationRequest(const char * const msg)  {
@@ -556,6 +569,7 @@ namespace Anycubic {
 
         // If probing completes ok save the mesh and park
         // Ignore the custom machine name
+        #if HAS_MESH
         if (strcmp_P(msg + strlen(CUSTOM_MACHINE_NAME), MARLIN_msg_ready) == 0) {
           if(probe_cnt == GRID_MAX_POINTS_X*GRID_MAX_POINTS_Y) {
             probe_cnt = 0;
@@ -566,6 +580,7 @@ namespace Anycubic {
             msg_matched = true;
           }
         }
+        #endif
 
         // If probing fails dont save the mesh raise the probe above the bad point
         if (strcmp_P(msg, MARLIN_msg_probing_failed) == 0) {
@@ -601,7 +616,9 @@ namespace Anycubic {
           SERIAL_ECHOLNPAIR("setFilamentRunoutState: ", __LINE__);
         #endif
 
+          #if HAS_FILAMENT_SENSOR
           setFilamentRunoutState(false);
+          #endif
         }
       } break;
 
@@ -1049,6 +1066,7 @@ namespace Anycubic {
     time_last = millis();
 
     // if the hotend temp is abnormal, confirm state before signalling panel
+    #if HAS_TEMP_HOTEND
     temp = getActualTemp_celsius(E0);
     if(!WITHIN(temp, HEATER_0_MINTEMP, HEATER_0_MAXTEMP)) {
         faultE0Duration++;
@@ -1060,7 +1078,9 @@ namespace Anycubic {
           faultE0Duration = 0;
         }
     }
+    #endif
 
+    #if HAS_TEMP_BED
     temp = getActualTemp_celsius(BED);
     if(!WITHIN(temp, BED_MINTEMP, BED_MAXTEMP)) {
         faultBedDuration++;
@@ -1072,6 +1092,7 @@ namespace Anycubic {
             faultBedDuration = 0;
         }
     }
+    #endif
 
 #if 0
     // Update panel with hotend heater status
@@ -1740,6 +1761,7 @@ namespace Anycubic {
         int16_t steps = mmToWholeSteps(-0.05, Z);
         babystepAxis_steps(steps, Z);
 
+        #if HAS_MESH
         GRID_LOOP(x, y) {
           const xy_uint8_t pos { x, y };
           const float currval = getMeshPoint(pos);
@@ -1748,6 +1770,7 @@ namespace Anycubic {
 #endif
           setMeshPoint(pos, constrain(currval - 0.05f, AC_LOWEST_MESHPOINT_VAL, 5));
         }
+        #endif
 
         z_change = true;
 
@@ -1785,12 +1808,14 @@ namespace Anycubic {
         int16_t steps = mmToWholeSteps(0.05, Z);
         babystepAxis_steps(steps, Z);
 
+        #if HAS_MESH
         GRID_LOOP(x, y) {
           const xy_uint8_t pos { x, y };
           const float currval = getMeshPoint(pos);
 //          SERIAL_ECHOLNPAIR("x: ", x, " y: ", y, " z: ", currval);
           setMeshPoint(pos, constrain(currval + 0.05f, AC_LOWEST_MESHPOINT_VAL, 5));
         }
+        #endif
 
         z_change = true;
 
@@ -2413,11 +2438,13 @@ namespace Anycubic {
 #if ACDEBUG(AC_MARLIN)
                 SERIAL_ECHOLNPAIR("z off: ", ftostr(getZOffset_mm()));
 #endif
+                #if HAS_MESH
                 GRID_LOOP(x, y) {
                   const xy_uint8_t pos { x, y };
                   const float currval = getMeshPoint(pos);
                   setMeshPoint(pos, constrain(currval + getZOffset_mm(), AC_LOWEST_MESHPOINT_VAL, 5));
                 }
+                #endif
 
                 injectCommands_P(PSTR("M500"));
                 ChangePageOfTFT(PAGE_PREPARE);
@@ -3349,6 +3376,7 @@ namespace Anycubic {
         }
     }
 
+#if HAS_BED_PROBE
     void DgusTFT::page201_handle(void)  // probe precheck
     {
         static millis_t probe_check_time = 0;
@@ -3413,6 +3441,9 @@ namespace Anycubic {
             SendTxtToTFT(str_buf, TXT_MAIN_BED);
         }
     }
+#else
+    void DgusTFT::page201_handle(void) {}  // no probe: precheck page unused
+#endif
 
     void DgusTFT::page202_handle(void)  // probe precheck ok
     {
