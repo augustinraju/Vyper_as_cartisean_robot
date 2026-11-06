@@ -34,7 +34,7 @@
   - X1 on the X driver (`X_STEP/DIR/ENABLE`).
   - X2 on the **E0** driver pins (extension cable). `X2_*_PIN` = `E0_*_PIN`.
   - Z1 is unchanged. ZR connector is wired to the E1 driver, so `Z2_*_PIN` = `E1_*_PIN`.
-- E0 direction pin (PB3) is shared with X2 direction. Pure X jogs therefore need the X2 direction re-written at the end of `Stepper::set_directions()`.
+- E0 direction pin (PB3) is shared with X2 direction. `Stepper::set_directions()` therefore must not write the E0 direction in this config (it would overwrite or glitch X2); X2 direction is set only through `X_APPLY_DIR`.
 - E0 is also the X2 step/enable pin: **do not send E moves on T0**. The E1 driver is the Z2 driver: **do not send E moves on T1** either.
 - Config enables the X min/max endstop plugs (`X_STOP_PIN` PA7, `X_MAX_PIN` PC6), but physical switches at the X boundaries are not confirmed. Do not home before X moves until this is verified.
 - Z homes on Z1 only (`Z_MULTI_ENDSTOPS` is off). The Z2 endstop (ZR_STOP) would share the X-MAX pin (PC6), per the comment in `Configuration_adv.h`.
@@ -56,7 +56,7 @@
    - `M606 S0` moves both X motors together (default). `M606 S1 X1` or `M606 S1 X2` locks the other motor for single-motor moves. `M606` calls `planner.synchronize()` first, so it waits for queued motion.
    - M605 (duplication mode) requires `DUAL_X_CARRIAGE`, so it is not compiled in this config.
    - Caveat: while a motor is locked, its step count is skipped, so after a single-motor move the two motors are physically apart by that distance. Return to `M606 S0` for combined motion.
-5. **X2 direction fix** (`stepper.cpp`): X2 direction is re-written after E0 direction at the end of `set_directions()` and XORed with `INVERT_X2_VS_X_DIR` (enabled). X- and X2- now move correctly toward X1 in combined moves. Not tested on the printer.
+5. **X2 direction fix** (`stepper.cpp`): `E0_DIR_PIN` is the same pin as `X2_DIR_PIN`, so `set_directions()` no longer writes the E0 direction when `X_DUAL_STEPPER_DRIVERS` is on. It only sets `count_direction.e`. The earlier fix re-wrote X2 after the E0 write at the end of `set_directions()`, which glitched the X2 DIR line right before stepping, and it was removed. X2 direction now comes only from `X_APPLY_DIR`, which writes `X2_DIR_WRITE(v ^ INVERT_X2_VS_X_DIR)` (`INVERT_X2_VS_X_DIR` is enabled).
 6. **Per-motor position counters**: `count_position_x1` and `count_position_x2` in `stepper.cpp`/`stepper.h`. They advance in the step-pulse path (`COUNT_DUAL_X_STEP` inside `PULSE_PREP`, around line 1564), skipped when that motor is locked by M606. `_set_position()` and `set_axis_position()` reset them, so homing and `G92 X` reset them. M114 prints `X1:<mm> X2:<mm>` through `Stepper::report_dual_x_positions()`.
 7. **Fixed-size bed**: `X_BED_SIZE` is set to 130 (was 246). `Y_BED_SIZE` is still 255. Not yet verified against the physical frame.
 8. **Stepper X-motor lock plumbing**: `locked_X_motor` / `locked_X2_motor` and `separate_multi_axis` are now compiled when `X_DUAL_STEPPER_DRIVERS` is on (previously only with `X_DUAL_ENDSTOPS`). `X_APPLY_STEP` uses `DUAL_SEPARATE_APPLY_STEP` for X in this mode.

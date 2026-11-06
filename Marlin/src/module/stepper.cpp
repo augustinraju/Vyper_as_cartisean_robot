@@ -487,7 +487,11 @@ void Stepper::set_directions() {
     SET_STEP_DIR(Z); // C
   #endif
 
-  #if DISABLED(LIN_ADVANCE)
+  #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+    // E0_DIR_PIN is X2_DIR_PIN here and no extruder is driven, so never write the E0 direction:
+    // it would glitch the X2 DIR line (X_APPLY_DIR -> E dir -> X2 re-write) right before stepping.
+    count_direction.e = motor_direction(E_AXIS) ? -1 : 1;
+  #elif DISABLED(LIN_ADVANCE)
     #if ENABLED(MIXING_EXTRUDER)
        // Because this is valid for the whole block we don't know
        // what e-steppers will step. Likely all. Set all.
@@ -510,12 +514,6 @@ void Stepper::set_directions() {
       }
     #endif
   #endif // !LIN_ADVANCE
-
-  #if ENABLED(X_DUAL_STEPPER_DRIVERS)
-    // X2_DIR_PIN is the same pin as E0_DIR_PIN on this board, so the E0 direction written above
-    // overwrote X2. Re-apply the X2 direction from the X axis direction.
-    X2_DIR_WRITE((motor_direction(X_AXIS) ? INVERT_X_DIR : !INVERT_X_DIR) ^ ENABLED(INVERT_X2_VS_X_DIR));
-  #endif
 
   #if HAS_L64XX
     if (L64XX_OK_to_power_up) { // OK to send the direction commands (which powers up the L64XX steppers)
