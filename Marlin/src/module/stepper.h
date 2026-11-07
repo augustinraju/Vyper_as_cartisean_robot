@@ -443,8 +443,8 @@ class Stepper {
     static void report_positions();
     #if ENABLED(X_DUAL_STEPPER_DRIVERS)
       static void report_dual_x_positions();
-      static float get_x2_position_mm();            // X2 motor position (mm), for EEPROM save
-      static void set_x2_position_mm(const float &mm); // Set X2 motor position (mm), for boot restore
+      // static float get_x2_position_mm();            // X2 motor position (mm), for EEPROM save
+      // static void set_x2_position_mm(const float &mm); // Set X2 motor position (mm), for boot restore
     #endif
 
     // Discard current block and free any resources

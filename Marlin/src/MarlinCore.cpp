@@ -962,17 +962,17 @@ inline void tmc_standby_setup() {
  *  - Print startup messages and diagnostics
  *  - Get EEPROM or default settings
  *  - Initialize managers for:
- *    â€?temperature
- *    â€?planner
- *    â€?watchdog
- *    â€?stepper
- *    â€?photo pin
- *    â€?servos
- *    â€?LCD controller
- *    â€?Digipot I2C
- *    â€?Z probe sled
- *    â€?status LEDs
- *    â€?Max7219
+ *    ï¿½?temperature
+ *    ï¿½?planner
+ *    ï¿½?watchdog
+ *    ï¿½?stepper
+ *    ï¿½?photo pin
+ *    ï¿½?servos
+ *    ï¿½?LCD controller
+ *    ï¿½?Digipot I2C
+ *    ï¿½?Z probe sled
+ *    ï¿½?status LEDs
+ *    ï¿½?Max7219
  */
 void setup() {
 
@@ -1160,7 +1160,7 @@ void setup() {
   SETUP_RUN(endstops.init());         // Init endstops and pullups
 
   SETUP_RUN(stepper.init());          // Init stepper. This enables interrupts!
-  TERN_(EEPROM_SETTINGS, settings.restore_last_position()); // Resume from the last-known position
+  // TERN_(EEPROM_SETTINGS, settings.restore_last_position()); // Resume from the last-known position
 
   #if HAS_SERVOS
     SETUP_RUN(servo_init());
@@ -1370,7 +1370,6 @@ void loop() {
   do {
     idle();
 
-    TERN_(EEPROM_SETTINGS, settings.save_position_if_moved());
 
     #if ENABLED(SDSUPPORT)
       if (card.flag.abort_sd_printing) abortSDPrinting();

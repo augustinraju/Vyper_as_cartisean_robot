@@ -461,7 +461,7 @@ typedef struct SettingsDataStruct {
   //
   // Last-known position: X1, Y, Z, X2 (mm). Restored at boot.
   //
-  float last_known_pos[4];
+  //float last_known_pos[4];
 } SettingsData;
 
 //static_assert(sizeof(SettingsData) <= MARLIN_EEPROM_SIZE, "EEPROM too small to contain SettingsData!");
@@ -608,38 +608,38 @@ void MarlinSettings::postprocess() {
    * The restored value is only the last position Marlin knew about: if the
    * gantry was moved while the printer was off, home (G28) to get the true one.
    */
-  static float last_known_pos[4];   // X1, Y, Z, X2 (mm) as loaded or last saved
-  static bool last_known_valid = false;
+  // static float last_known_pos[4];   // X1, Y, Z, X2 (mm) as loaded or last saved
+  // static bool last_known_valid = false;
 
-  void MarlinSettings::restore_last_position() {
-    if (!last_known_valid) return;
-    current_position.x = last_known_pos[0];
-    current_position.y = last_known_pos[1];
-    current_position.z = last_known_pos[2];
-    planner.set_position_mm(current_position);
-    TERN_(X_DUAL_STEPPER_DRIVERS, stepper.set_x2_position_mm(last_known_pos[3]));
-    DEBUG_ECHOLNPAIR("Restored last position X:", current_position.x, " Y:", current_position.y, " Z:", current_position.z);
-  }
+  // void MarlinSettings::restore_last_position() {
+  //   if (!last_known_valid) return;
+  //   current_position.x = last_known_pos[0];
+  //   current_position.y = last_known_pos[1];
+  //   current_position.z = last_known_pos[2];
+  //   planner.set_position_mm(current_position);
+  //   TERN_(X_DUAL_STEPPER_DRIVERS, stepper.set_x2_position_mm(last_known_pos[3]));
+  //   DEBUG_ECHOLNPAIR("Restored last position X:", current_position.x, " Y:", current_position.y, " Z:", current_position.z);
+  // }
 
-  void MarlinSettings::save_position_if_moved() {
-    static millis_t quiet_since = 0;   // Time of the last sign of motion
-    if (planner.has_blocks_queued()) { quiet_since = millis(); return; }
-    if (ELAPSED(quiet_since + 2000, millis())) return;  // Wait for the gantry to settle
+  // void MarlinSettings::save_position_if_moved() {
+  //   static millis_t quiet_since = 0;   // Time of the last sign of motion
+  //   if (planner.has_blocks_queued()) { quiet_since = millis(); return; }
+  //   if (ELAPSED(quiet_since + 2000, millis())) return;  // Wait for the gantry to settle
 
-    const float now[4] = {
-      current_position.x, current_position.y, current_position.z,
-      TERN(X_DUAL_STEPPER_DRIVERS, stepper.get_x2_position_mm(), current_position.x)
-    };
-    if (last_known_valid) {
-      bool changed = false;
-      LOOP_L_N(i, 4) if (ABS(now[i] - last_known_pos[i]) > 0.05f) changed = true;
-      if (!changed) return;
-    }
+  //   const float now[4] = {
+  //     current_position.x, current_position.y, current_position.z,
+  //     TERN(X_DUAL_STEPPER_DRIVERS, stepper.get_x2_position_mm(), current_position.x)
+  //   };
+  //   if (last_known_valid) {
+  //     bool changed = false;
+  //     LOOP_L_N(i, 4) if (ABS(now[i] - last_known_pos[i]) > 0.05f) changed = true;
+  //     if (!changed) return;
+  //   }
 
-    LOOP_L_N(i, 4) last_known_pos[i] = now[i];
-    last_known_valid = true;
-    MarlinSettings::save();  // Writes the whole settings block, including last_known_pos
-  }
+  //   LOOP_L_N(i, 4) last_known_pos[i] = now[i];
+  //   last_known_valid = true;
+  //   MarlinSettings::save();  // Writes the whole settings block, including last_known_pos
+  // }
 
   /**
    * M500 - Store Configuration
@@ -1431,13 +1431,13 @@ void MarlinSettings::postprocess() {
     //
     // Last-known position (X1, Y, Z, X2)
     //
-    {
-      const float pos[4] = {
-        current_position.x, current_position.y, current_position.z,
-        TERN(X_DUAL_STEPPER_DRIVERS, stepper.get_x2_position_mm(), current_position.x)
-      };
-      EEPROM_WRITE(pos);
-    }
+    // {
+    //   const float pos[4] = {
+    //     current_position.x, current_position.y, current_position.z,
+    //     TERN(X_DUAL_STEPPER_DRIVERS, stepper.get_x2_position_mm(), current_position.x)
+    //   };
+    //   EEPROM_WRITE(pos);
+    // }
 
     //
     // Report final CRC and Data Size
@@ -2321,15 +2321,15 @@ void MarlinSettings::postprocess() {
       //
       // Last-known position (X1, Y, Z, X2)
       //
-      {
-        _FIELD_TEST(last_known_pos);
-        float pos[4];
-        EEPROM_READ(pos);
-        if (!validating) {
-          LOOP_L_N(i, 4) last_known_pos[i] = pos[i];
-          last_known_valid = true;
-        }
-      }
+      // {
+      //   _FIELD_TEST(last_known_pos);
+      //   float pos[4];
+      //   EEPROM_READ(pos);
+      //   if (!validating) {
+      //     LOOP_L_N(i, 4) last_known_pos[i] = pos[i];
+      //     last_known_valid = true;
+      //   }
+      // }
 
       //
       // Validate Final Size and CRC

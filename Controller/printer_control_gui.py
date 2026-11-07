@@ -11,6 +11,7 @@ Usage:
 import queue
 import re
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -18,32 +19,153 @@ import serial
 import serial.tools.list_ports
 
 BAUDRATE = 115200  # matches BAUDRATE in Marlin/Configuration.h
-FEEDRATE = 1200    # mm/min for jog movesW
+BOOT_DELAY_S = 3.0  # wait after opening the port (board resets) before sending
+FEEDRATE = 1200   # mm/min for jog movesW
 POSITION_INTERVAL_MS = 500  # how often M114 (current position) is polled
 POSITION_RE = re.compile(
     r"X:(-?\d+\.?\d*)\s+Y:(-?\d+\.?\d*)\s+Z:(-?\d+\.?\d*)\s+E:(-?\d+\.?\d*)"
 )
 DUAL_X_RE = re.compile(r"X1:(-?\d+\.?\d*)\s+X2:(-?\d+\.?\d*)")  # per-motor X (mm)
+RESEND_RE = re.compile(r"^(?:Resend|rs)[:\s]+N?(\d+)", re.IGNORECASE)
+ACK_TIMEOUT_S = 10.0  # no "ok" (or "busy:") for this long -> retransmit the same line
 POS_LABELS = {"X": "X mid:", "X1": "X1:", "X2": "X2:", "Y": "Y:", "Z": "Z:"}
 
 
+def frame(n: int, line: str) -> str:
+    """Marlin host protocol: 'N<n> <cmd>*<xor checksum>'."""
+    body = f"N{n} {line}"
+    checksum = 0
+    for ch in body.encode("ascii"):
+        checksum ^= ch
+    return f"{body}*{checksum}"
+
+
 class PrinterConnection:
-    """Handles the serial connection and reads responses in a background thread."""
+    """Handles the serial connection and reads responses in a background thread.
+
+    Every line is sent with a line number and checksum, one at a time (stop-and-wait):
+      * corrupted line  -> Marlin answers "Error:checksum mismatch" + "Resend: N" -> resent
+      * lost line / lost "ok" -> after ACK_TIMEOUT_S the same numbered line is resent.
+        If Marlin already ran it, it rejects the duplicate number and asks for N+1,
+        so a move is never executed twice.
+    """
 
     def __init__(self, rx_queue: queue.Queue):
         self.ser = None
         self.rx_queue = rx_queue
-        self._running = False
+        self._stop = threading.Event()
+        self._threads: list = []
+        self._ready_at = 0.0
         self._lock = threading.Lock()
-        self._silent_acks = 0  # "ok" replies belonging to silent (polling) commands
+        self._tx_queue: queue.Queue = queue.Queue()
+        self._ack = threading.Event()  # set when Marlin answers "ok"
+        self._resend = None  # line number from the last "Resend:" request
+        self._last_rx = 0.0  # time of the last "busy:" keepalive
+
+    @property
+    def busy(self) -> bool:
+        return not self._tx_queue.empty()
 
     def connect(self, port: str) -> None:
-        self.ser = serial.Serial(port, BAUDRATE, timeout=0.5)
-        self._running = True
-        threading.Thread(target=self._reader, daemon=True).start()
+        # Fresh state per connection; each connection's threads have their own stop
+        # event, so threads of an earlier connection can never run alongside new ones.
+        self._tx_queue = queue.Queue()
+        self._ack = threading.Event()
+        self._resend = None
+        self.ser = serial.Serial(port, BAUDRATE, timeout=0.5, write_timeout=5)
+        self._stop = threading.Event()
+        self._ready_at = time.monotonic() + BOOT_DELAY_S
+        self._threads = [
+            threading.Thread(target=self._reader, args=(self.ser, self._stop), daemon=True),
+            threading.Thread(target=self._writer, args=(self.ser, self._stop), daemon=True),
+        ]
+        for t in self._threads:
+            t.start()
+
+    def _write_raw(self, ser, data: str) -> bool:
+        try:
+            ser.write(data.encode("ascii"))
+            return True
+        except (serial.SerialException, OSError) as exc:
+            self.rx_queue.put(f"!! Serial error: {exc}")
+            return False
+
+    def _transact(self, ser, stop: threading.Event, n: int, line: str):
+        """Send numbered line n until Marlin accepts it.
+
+        Returns True when accepted, False on stop/serial failure.
+        """
+        attempt = 0
+        while not stop.is_set():
+            with self._lock:
+                self._resend = None
+            self._ack.clear()
+            if not self._write_raw(ser, frame(n, line) + "\n"):
+                if stop.is_set() or not ser.is_open:
+                    return False
+                time.sleep(0.5)
+                continue
+            self._last_rx = time.monotonic()
+            # Wait for "ok". M606 / full planner can block for a while; "busy:"
+            # keepalives (HOST_KEEPALIVE_FEATURE) push the deadline out.
+            while not stop.is_set() and not self._ack.wait(timeout=0.2):
+                if time.monotonic() - self._last_rx > ACK_TIMEOUT_S:
+                    break
+            if stop.is_set():
+                return False
+            if not self._ack.is_set():
+                attempt += 1
+                self.rx_queue.put(f"!! No reply to N{n} {line}, resending ({attempt})")
+                continue
+            with self._lock:
+                resend = self._resend
+            if resend is None or resend == n + 1:
+                return True  # accepted (n+1 = duplicate of an already-run line)
+            attempt += 1
+            self.rx_queue.put(f"!! Printer asked to resend N{resend}, resending {line} ({attempt})")
+            if resend != n:
+                # Marlin expects an earlier/later number than ours: resync the counter
+                # instead of replaying old moves (only this line is retransmitted).
+                self._resync(ser, n - 1)
+        return False
+
+    def _resync(self, ser, last_n: int) -> None:
+        """Tell Marlin the last line number was last_n (unnumbered M110 is always accepted)."""
+        self._ack.clear()
+        if self._write_raw(ser, f"M110 N{last_n}\n"):
+            self._ack.wait(timeout=2)
+
+    def _writer(self, ser, stop: threading.Event) -> None:
+        """Send one numbered line at a time and wait for Marlin's "ok"."""
+        # Opening the port may reset the board (DTR); wait for it to boot.
+        while not stop.is_set() and time.monotonic() < self._ready_at:
+            time.sleep(0.1)
+        ser.reset_input_buffer()
+        # A bare newline terminates any partial line left in Marlin's RX buffer
+        # (that leftover is what produced "MM114"), then reset the line counter.
+        self._write_raw(ser, "\n")
+        time.sleep(0.2)
+        ser.reset_input_buffer()
+        n = 0
+        self._resync(ser, n)
+        while not stop.is_set():
+            try:
+                line, log = self._tx_queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            n += 1
+            if log:
+                self.rx_queue.put(f">> {line}")
+            if not self._transact(ser, stop, n, line):
+                break
+            if log:
+                self.rx_queue.put("<< ok")
 
     def disconnect(self) -> None:
-        self._running = False
+        self._stop.set()
+        for t in self._threads:
+            t.join(timeout=2)  # reader wakes within its 0.5 s read timeout
+        self._threads = []
         if self.ser:
             self.ser.close()
             self.ser = None
@@ -55,19 +177,15 @@ class PrinterConnection:
     def send(self, line: str, log: bool = True) -> None:
         if not self.connected:
             raise RuntimeError("Not connected")
-        if not log:
-            with self._lock:
-                self._silent_acks += 1
-        self.ser.write((line.strip() + "\n").encode("ascii"))
-        if log:
-            self.rx_queue.put(f">> {line.strip()}")
+        self._tx_queue.put((line.strip(), log))
 
-    def _reader(self) -> None:
-        while self._running and self.ser:
+    def _reader(self, ser, stop: threading.Event) -> None:
+        while not stop.is_set():
             try:
-                raw = self.ser.readline()
-            except serial.SerialException as exc:
-                self.rx_queue.put(f"!! Serial error: {exc}")
+                raw = ser.readline()
+            except (serial.SerialException, OSError) as exc:
+                if not stop.is_set():
+                    self.rx_queue.put(f"!! Serial error: {exc}")
                 break
             if not raw:
                 continue
@@ -84,10 +202,15 @@ class PrinterConnection:
             if text.startswith("Count "):
                 continue  # M114 step-count line, sent on every poll: keep it out of the log
             if text.startswith("ok"):
+                self._ack.set()  # the writer logs "<< ok" for non-silent commands
+                continue
+            resend = RESEND_RE.match(text)
+            if resend:
                 with self._lock:
-                    if self._silent_acks:
-                        self._silent_acks -= 1  # this ack belongs to a silent command
-                        continue
+                    self._resend = int(resend.group(1))  # acted on when the "ok" follows
+                continue
+            if "busy:" in text:
+                self._last_rx = time.monotonic()  # Marlin is alive, just still working
             self.rx_queue.put(f"<< {text}")
 
 
@@ -163,9 +286,23 @@ class App(tk.Tk):
         ttk.Button(ref, text="Set zero here (G92 X0 Y0 Z0)",
                    command=self.set_zero).grid(row=0, column=0, sticky="ew", **pad)
 
+        # Manual absolute positioning
+        goto = ttk.LabelFrame(self, text="Go to position (mm, relative to zero)")
+        goto.grid(row=5, column=0, sticky="ew", **pad)
+        self.goto_vars = {key: tk.StringVar() for key in ("X", "Y", "Z")}
+        for i, (key, var) in enumerate(self.goto_vars.items()):
+            label = "X mid:" if key == "X" else f"{key}:"
+            ttk.Label(goto, text=label).grid(row=0, column=2 * i, sticky="e", **pad)
+            entry = ttk.Entry(goto, textvariable=var, width=8)
+            entry.grid(row=0, column=2 * i + 1, **pad)
+            entry.bind("<Return>", lambda _e: self.goto_position())
+        ttk.Button(goto, text="Send", command=self.goto_position).grid(row=0, column=6, **pad)
+        ttk.Label(goto, text="Leave a field empty to keep that axis unchanged.").grid(
+            row=1, column=0, columnspan=7, sticky="w", **pad)
+
         # Log
         log_frame = ttk.LabelFrame(self, text="Log")
-        log_frame.grid(row=5, column=0, sticky="nsew", **pad)
+        log_frame.grid(row=6, column=0, sticky="nsew", **pad)
         self.log = tk.Text(log_frame, width=44, height=10, state="disabled")
         self.log.pack(fill="both", expand=True, padx=4, pady=4)
 
@@ -209,6 +346,49 @@ class App(tk.Tk):
         self.send("G91")
         self.send(f"G1 {axis}{distance:.2f} F{FEEDRATE}")
         self.send("G90")
+
+    def goto_position(self) -> None:
+        """Move to typed X mid / Y / Z targets (empty field = axis untouched)."""
+        if not self.printer.connected:
+            messagebox.showwarning("Not connected", "Connect to the printer first.")
+            return
+        targets = {}
+        try:
+            for axis, var in self.goto_vars.items():
+                text = var.get().strip().replace(",", ".")
+                if text:
+                    targets[axis] = float(text)
+        except ValueError:
+            messagebox.showwarning("Invalid value", "Enter numbers only (mm).")
+            return
+        if not targets:
+            return
+
+        words = []
+        relative_x = False
+        if "X" in targets:
+            try:
+                mid = float(self.pos_vars["X"].get())
+                # Move both motors by the distance from the current midpoint, so a
+                # previous single-motor offset between X1 and X2 is preserved.
+                words.append(f"X{targets['X'] - mid:.2f}")
+                relative_x = True
+            except ValueError:
+                words.append(f"X{targets['X']:.2f}")  # no midpoint known: absolute X
+        if "Y" in targets:
+            words.append(f"Y{targets['Y']:.2f}")
+        if "Z" in targets:
+            words.append(f"Z{targets['Z']:.2f}")
+
+        if relative_x:
+            # G91 would also make Y/Z relative, so send X relative, then Y/Z absolute.
+            self.send("G91")
+            self.send(f"G1 {words[0]} F{FEEDRATE}")
+            self.send("G90")
+            words = words[1:]
+        if words:
+            self.send(f"G1 {' '.join(words)} F{FEEDRATE}")
+        self.send("M114")
 
     def set_zero(self) -> None:
         """Declare the current physical position as X0 Y0 Z0 (G92). No motion."""
@@ -264,7 +444,7 @@ class App(tk.Tk):
 
     def _position_tick(self) -> None:
         """Periodically ask Marlin for its current position (M114) while connected."""
-        if self.printer.connected:
+        if self.printer.connected and not self.printer.busy:
             try:
                 self.printer.send("M114", log=False)
             except (RuntimeError, serial.SerialException):

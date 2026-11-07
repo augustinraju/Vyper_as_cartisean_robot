@@ -2774,13 +2774,13 @@ void Stepper::report_positions() {
     SERIAL_ECHOLNPAIR("X1:", count_position_x1 / spmm, " X2:", count_position_x2 / spmm);
   }
 
-  float Stepper::get_x2_position_mm() {
-    return float(count_position_x2) / planner.settings.axis_steps_per_mm[X_AXIS];
-  }
+  // float Stepper::get_x2_position_mm() {
+  //   return float(count_position_x2) / planner.settings.axis_steps_per_mm[X_AXIS];
+  // }
 
-  void Stepper::set_x2_position_mm(const float &mm) {
-    count_position_x2 = int32_t(mm * planner.settings.axis_steps_per_mm[X_AXIS]);
-  }
+  // void Stepper::set_x2_position_mm(const float &mm) {
+  //   count_position_x2 = int32_t(mm * planner.settings.axis_steps_per_mm[X_AXIS]);
+  // }
 #endif
 
 #if ENABLED(BABYSTEPPING)
