@@ -568,8 +568,8 @@
   // X1's switch is X_MIN_POS, X2's switch is X_MIN_POS + X_GRIPPER_HOME_GAP.
   // Logical X is the midpoint of the grippers (M606 S0), or the single active gripper (M606 S1).
   // After G28 both grippers are limited to the range between the two switches.
-  #define X_GRIPPER_HOME_GAP  182   // (mm) Distance between the X1 and X2 grippers when both are homed
-  #define X_GRIPPER_MIN_GAP     0   // (mm) Closest the grippers may get in single-motor moves. MEASURE and set!
+  #define X_GRIPPER_HOME_GAP  181   // (mm) Distance between the X1 and X2 grippers when both are homed
+  #define X_GRIPPER_MIN_GAP     2   // (mm) Closest the grippers may get in single-motor moves. MEASURE and set!
 
   // X2 uses the E0 driver (extension-cable port); Z2 uses the E1 driver (ZR connector).
   // Z1 pins are untouched.

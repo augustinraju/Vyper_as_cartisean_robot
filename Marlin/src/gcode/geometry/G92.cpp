@@ -76,6 +76,20 @@ void GcodeSuite::G92() {
             #if IS_SCARA || !HAS_POSITION_SHIFT || ENABLED(X_DUAL_STEPPER_DRIVERS)
               if (i == E_AXIS) sync_E = true; else sync_XYZ = true;
               current_position[i] = v;        // Without workspaces revert to Marlin 1.0 behavior
+              #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+                // The new raw position no longer matches the switch positions the soft
+                // limits assume, so the axis counts as unhomed until it is homed again.
+                // Otherwise a later move gets clamped to the old range and can drive
+                // the axis (e.g. X2) into or past its switch.
+                if (i != E_AXIS) {
+                  set_axis_unhomed((AxisEnum)i);
+                  if (i == X_AXIS) {
+                    // Only the active X motor(s) get their counters shifted (Stepper::_set_position)
+                    if (stepper.x1_active()) dual_x_set_homed(1, false);
+                    if (stepper.x2_active()) dual_x_set_homed(2, false);
+                  }
+                }
+              #endif
             #elif HAS_POSITION_SHIFT
               if (i == E_AXIS) {
                 sync_E = true;

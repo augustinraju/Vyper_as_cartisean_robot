@@ -415,6 +415,18 @@ void Endstops::event_handler() {
         print_job_timer.stop();
       }
     #endif
+
+    #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+      // Gantry robot: a hit outside homing (M120) cuts the move short, but
+      // current_position and the planner still hold the commanded target. Drop the
+      // queued moves (planned from the wrong position) and re-read the position from
+      // the steppers. The X1/X2 counters stay, since logical X comes from the same
+      // step count. Runs from loop() only, so homing moves (G28, M606 H2) never get
+      // here: they clear hit_state before their command returns.
+      quickstop_stepper();
+      // Clear the hit so a second hit on the same switch is caught too
+      hit_on_purpose();
+    #endif
   }
 }
 
@@ -538,8 +550,11 @@ void Endstops::update() {
   #elif ENABLED(X_DUAL_STEPPER_DRIVERS) && DISABLED(X_DUAL_ENDSTOPS)
     // Gantry robot: X min is X1's switch, X max is X2's switch. While one motor is
     // locked (M606 S1), its switch must not stop the other motor.
-    #define X_MIN_TEST() stepper.x1_active()
+    // Mirror mode (M606 S2): X1 moves against the logical X, so its switch (X min)
+    // is checked on +X (opening, see X_MIN_TEST_MIRRORED in update()), not on -X.
+    #define X_MIN_TEST() (stepper.x1_active() && !stepper.x_mirrored())
     #define X_MAX_TEST() stepper.x2_active()
+    #define X_MIN_TEST_MIRRORED 1
   #else
     #define X_MIN_TEST() true
     #define X_MAX_TEST() true
@@ -802,6 +817,10 @@ void Endstops::update() {
       #endif
     }
     else { // +direction
+      #if defined(X_MIN_TEST_MIRRORED) && HAS_X_MIN
+        // Mirror mode, opening: X1 runs towards its switch at X min
+        if (stepper.x_mirrored()) PROCESS_ENDSTOP(X, MIN);
+      #endif
       #if HAS_X_MAX || (X_SPI_SENSORLESS && X_HOME_DIR > 0)
         PROCESS_ENDSTOP_X(MAX);
         #if   CORE_DIAG(XY, Y, MIN)

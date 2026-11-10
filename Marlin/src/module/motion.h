@@ -207,8 +207,10 @@ inline float home_bump_mm(const AxisEnum axis) {
 
 #if ENABLED(X_DUAL_STEPPER_DRIVERS)
   // Gantry robot with two opposed X motors (M606.cpp)
-  void dual_x_select(const uint8_t motor);                // 0 = both (M606 S0), 1 = X1 only, 2 = X2 only
+  #define DUAL_X_MIRRORED 3                               // dual_x_select(): M606 S2, grippers move opposite
+  void dual_x_select(const uint8_t motor);                // 0 = both (M606 S0), 1 = X1 only, 2 = X2 only, DUAL_X_MIRRORED
   void dual_x_set_homed(const uint8_t motor, const bool homed);
+  void dual_x_clear_homed();                              // Both unhomed (X motors disabled): limits off
   bool dual_x_motion_limits(float &lo, float &hi);        // false until X1 and X2 are both homed
 #endif
 

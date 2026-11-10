@@ -4,7 +4,7 @@
 - Marlin 2.x fork of the ANYCUBIC-3D/Vyper firmware (`vyper` branch, release 2.4.5 for hardware v0.0.6) for an Anycubic Vyper printer.
 - Remotes: `upstream` = `https://github.com/ANYCUBIC-3D/Vyper.git` (branch `vyper`)
 - The printer is repurposed as a **gantry robot (gripper)**: the extruder and hotend are removed, and the controller is driven over USB serial.
-- Board target: `BOARD_AC_TRI_F1_V1` (TriGorilla STM32F103RE board, env `ac_tri_f1`).
+- Board target: `BOARD_AC_TRI_F1_V1` (TriGorilla board, env `ac_tri_f1`). The MCU is a GD32F103 (STM32F103 clone); the build targets STM32F103RE, as upstream does.
 - No extruders are present. `EXTRUDERS` is 2, but no extruder is driven: the E0 and E1 drivers carry X2 and Z2 (see Hardware Facts). The two X motors sit opposite each other, with their top portions facing each other.
 
 ## Build
@@ -31,7 +31,7 @@
 - `Marlin/src/module/endstops.cpp`: `X_MIN_TEST` / `X_MAX_TEST` tied to the active X motor.
 - `Marlin/src/module/settings.cpp` / `settings.h`: `EEPROM_VERSION` bumped; last-position save/restore code present but commented out.
 - `Marlin/src/lcd/extui/lib/anycubic_dgus/dgus_tft.cpp` and `Marlin/src/lcd/extui/ui_api.cpp`: DGUS touchscreen UI, guarded for missing heater/probe/runout/mesh; flow functions stubbed.
-- `Controller/printer_control_gui.py` (new): tkinter control GUI over serial.
+- `Controller/printer_control_gui.py` (new): entry point of the tkinter control GUI. Code is in `Controller/vyper_host/`: `config.py` (constants), `protocol.py` (framing/parsing), `connection.py` (`PrinterConnection`), `commands.py` (G-code sequences, usable without the GUI), `widgets.py` (Tk panels), `app.py` (`App`).
 - `RoboCup/Simulation/` (new): PyBullet simulation (`vyper.urdf`, `run_gui.py`, `plan_gripper_move.py`). `RoboCup/Planner/path_planner.py` is an empty placeholder.
 - `buildroot/`, `docker/`, `docs/`, `config/`, `data/www/`: Marlin support material.
 
@@ -42,7 +42,7 @@
   - Z1 is unchanged. ZR connector is wired to the E1 driver, so `Z2_*_PIN` = `E1_*_PIN`.
 - E0 direction pin (PB3) is shared with X2 direction. `Stepper::set_directions()` therefore must not write the E0 direction in this config (it would glitch X2); X2 direction is set only through `X_APPLY_DIR`.
 - E0 is also the X2 step/enable pin: **do not send E moves on T0**. The E1 driver is the Z2 driver: **do not send E moves on T1** either.
-- Board is a TriGorilla V0.0.6 (stock Vyper board; pin map matches `pins_AC_TRI_F1_V1.h`).
+- Board is a TriGorilla V0.0.6 (stock Vyper board; pin map matches `pins_AC_TRI_F1_V1.h`) with a GD32F103 MCU, not a genuine STM32F103. The firmware is built for STM32F103RE (`ac_tri_f103re.json`, `MCU_STM32F103RE`) and runs on the GD32 as a compatible part.
 - Endstops, by real pin in `pins_AC_TRI_F1_V1.h`:
   - X1: `X_MIN_PIN` PA7 (X connector). Homes to min: `M606 S1 X1`, `G28 X`, `M606 S0`.
   - X2: `X_MAX_PIN` PA5 ("filament" connector; upstream had X max on PC6), switch physically at X max. Homes with `M606 H2` (X1 locked, ends in `M606 S0`). The board pulls PA5 low (made for an active-high runout sensor), so the switch goes between the +5V pin and S (COM to +5V, NO to S), `X_MAX_ENDSTOP_INVERTING false`. A switch to GND on this connector never registers.
@@ -50,10 +50,11 @@
   - X min only counts while X1 is active and X max only while X2 is active (`X_MIN_TEST` / `X_MAX_TEST` in `endstops.cpp`, `Stepper::x1_active()` / `x2_active()`).
   - Y: `Y_MIN_PIN` PC5. Z1: `Z_MIN_PIN` PB2 (ZL). Z2: `Z2_MIN_PIN` PC6 (ZR), via `Z_MULTI_ENDSTOPS`. `Z2_USE_ENDSTOP _ZMAX_` (with `USE_ZMAX_PLUG`, `Z_MAX_PIN` -1) is a placeholder Marlin 2.0's SanityCheck requires (upstream used `_XMAX_`).
   - Inverting: X min and Y min `true`, Z min, Z2 min and X max `false`. X1's switch is normally open to GND (verified with `M119`). Others not yet verified.
-- X1 and X2 share one X frame: X1's switch is `X_MIN_POS` (0), X2's switch is `X_MIN_POS + X_GRIPPER_HOME_GAP` (182 mm). After `G28`: X1 = 0, X2 = 182, logical X = 91.
-- Logical X (`G1 X`, M114 `X:`) is the gripper midpoint in `M606 S0`, and the active gripper's position in `M606 S1 X1` / `S1 X2`. `dual_x_select()` (`M606.cpp`) switches the mode and re-derives the logical X from the X1/X2 counters. `G28` always ends in `M606 S0`.
+- X1 and X2 share one X frame: X1's switch is `X_MIN_POS` (0), X2's switch is `X_MIN_POS + X_GRIPPER_HOME_GAP` (181 mm). After `G28`: X1 = 0, X2 = 181, logical X = 91.
+- Logical X (`G1 X`, M114 `X:`) is the gripper midpoint in `M606 S0`, the active gripper's position in `M606 S1 X1` / `S1 X2`, and half the gap in `M606 S2`. `dual_x_select()` (`M606.cpp`) switches the mode and re-derives the logical X from the X1/X2 counters. `G28` always ends in `M606 S0`.
+- An endstop hit outside homing (M120) calls `quickstop_stepper()` from `Endstops::event_handler()`: the queued moves are dropped and the position is re-read from the steppers, so the logical X/Y/Z match where the axes stopped.
 - Position resets (`_set_position`, `set_axis_position`) shift the active X motor counter(s) by the change of the logical X. Y/Z homing and `G92 Y/Z` leave X1/X2 alone.
-- Soft limits (`dual_x_motion_limits()`, used in `apply_motion_limits`), active once both X motors are homed: X1 >= its switch, X2 <= its switch, X2 - X1 >= `X_GRIPPER_MIN_GAP` (placeholder 0, measure it). Right after `G28` combined X cannot move, since both grippers sit on their switches. Narrow the gap with single-motor moves first.
+- Soft limits (`dual_x_motion_limits()`, used in `apply_motion_limits`), active once both X motors are homed: X1 >= its switch, X2 <= its switch, X2 - X1 >= `X_GRIPPER_MIN_GAP` (placeholder 0, measure it). Right after `G28` combined X cannot move, since both grippers sit on their switches. Narrow the gap with single-motor moves first. Disabling X (M18/M84, `M84 S<n>` timeout, kill) clears both homed bits via `DISABLE_AXIS_X` -> `dual_x_clear_homed()`, so the limits are off until X is homed again. A failed X2 homing inside G28 calls `kill()` like a failed X1 homing (`M606 H2` on its own only reports the error).
 - No heater is fitted. **Do not send M104/M109/M140/M190.** Heater pins are still wired and there is no real temperature feedback.
 
 ## Firmware Changes vs. upstream `vyper`
@@ -82,17 +83,18 @@
 8. **Pins** (`pins_AC_TRI_F1_V1.h`): `X_MAX_PIN` PC6 -> PA5, new `Z2_MIN_PIN` PC6, comments for the gantry wiring.
 9. **Park point** (`Configuration.h`): `NOZZLE_PARK_POINT` Z 20 -> `(Z_MIN_POS + 20)`.
 10. **Independent X motors via `X_DUAL_STEPPER_DRIVERS` + M606** (not `DUAL_X_CARRIAGE`):
-    - `Configuration_adv.h`: `X_DUAL_STEPPER_DRIVERS` and `INVERT_X2_VS_X_DIR` enabled, `X_DUAL_ENDSTOPS` off, `X_GRIPPER_HOME_GAP 182`, `X_GRIPPER_MIN_GAP 0`, `X2_*` = `E0_*` and `Z2_*` = `E1_*` pins (Z2 pins are defined in both the X-dual and the Z block, same values).
+    - `Configuration_adv.h`: `X_DUAL_STEPPER_DRIVERS` and `INVERT_X2_VS_X_DIR` enabled, `X_DUAL_ENDSTOPS` off, `X_GRIPPER_HOME_GAP 181`, `X_GRIPPER_MIN_GAP 2`, `X2_*` = `E0_*` and `Z2_*` = `E1_*` pins (Z2 pins are defined in both the X-dual and the Z block, same values).
     - `DUAL_X_CARRIAGE` stays disabled (mutually exclusive in `SanityCheck.h`). Its block was edited anyway (X2 pins, `INVERT_X2_VS_X_DIR`, default mode `DXC_DUPLICATION_MODE`), and the `DUAL_X_CARRIAGE` branch of `X_APPLY_DIR` in `stepper.cpp` honours `INVERT_X2_VS_X_DIR`.
-    - `M606 S0`: both X motors (default). `M606 S1 X1` / `M606 S1 X2`: only that motor. `M606 H2`: home X2 to X max. M606 calls `planner.synchronize()` first.
+    - `M606 S0`: both X motors (default). `M606 S1 X1` / `M606 S1 X2`: only that motor. `M606 S2`: gripper (mirror) mode, both motors at once in opposite directions, logical X = half the gap (`G90 G1 X50` = gap 100 mm; +X opens). `M606 H2`: home X2 to X max. M606 calls `planner.synchronize()` first.
+    - Mirror mode (`Stepper::mirror_x`, set by `dual_x_select(DUAL_X_MIRRORED)`): `X_APPLY_DIR` reverses only X1's DIR, the X1 counter runs opposite to the logical X, `dual_x_logical_steps()` returns `(X2 - X1) / 2`. `dual_x_select()` calls `stepper.set_directions()` after every mode change, because the DIR pins are otherwise only rewritten when a block's direction bits change. Soft limits in S2: half gap in `[X_GRIPPER_MIN_GAP/2, min(mid - X_MIN_POS, X2 switch - mid)]`. Endstops in S2: X min (X1) and X max (X2) are both checked on +X (opening), neither on -X (`endstops.cpp`). G28 leaves S2 (it selects X1, X2 and ends in S0).
     - M605 needs `DUAL_X_CARRIAGE`, so it is not compiled.
 11. **Stepper changes** (`stepper.cpp` / `stepper.h`):
-    - Lock plumbing: `locked_X_motor` / `locked_X2_motor` and `separate_multi_axis` compiled with `X_DUAL_STEPPER_DRIVERS`; `X_APPLY_STEP` uses `DUAL_SEPARATE_APPLY_STEP`; new `x1_active()` / `x2_active()`.
+    - Lock plumbing: `locked_X_motor` / `locked_X2_motor` compiled with `X_DUAL_STEPPER_DRIVERS`, gated by their own flag `separate_x_axis` (set by `dual_x_select()`), not `separate_multi_axis`. That flag would also switch `Z_MULTI_ENDSTOPS` into homing behaviour (Z motors stop per switch), so M606 S1 must not touch it. `X_APPLY_STEP` and the X1/X2 counters use `x1_active()` / `x2_active()`.
     - X2 direction fix: `set_directions()` does not write the E0 direction (shared with X2 DIR); it only sets `count_direction.e`. X2 direction comes only from `X_APPLY_DIR` (`X2_DIR_WRITE(v ^ INVERT_X2_VS_X_DIR)`).
     - Per-motor counters `count_position_x1` / `count_position_x2`, advanced in `PULSE_PREP` (`COUNT_DUAL_X_STEP`) unless that motor is locked. `_set_position()` / `set_axis_position()` shift the active counters by the change in logical X, unless `dual_x_hold_counts` is set (used by `dual_x_select()`).
     - `report_dual_x_positions()` (M114 `X1:` / `X2:` line), `dual_x_logical_steps()`, `x1_steps()` / `x2_steps()`.
 12. **Homing and motion** (`G28.cpp`, `M606.cpp`, `motion.cpp`, `endstops.cpp`): G28 X homes X1 to min, then X2 to max, and G28 ends in `dual_x_select(0)`; `apply_motion_limits` uses `dual_x_motion_limits()` instead of the X soft endstops; endstop tests follow the active X motor.
-13. **G92** (`G92.cpp`): with `X_DUAL_STEPPER_DRIVERS`, G92 sets the raw position (Marlin 1.0 behaviour) instead of a workspace offset, so the X1/X2 counters and soft limits are re-referenced.
+13. **G92** (`G92.cpp`): with `X_DUAL_STEPPER_DRIVERS`, G92 sets the raw position (Marlin 1.0 behaviour) instead of a workspace offset, so the X1/X2 counters and soft limits are re-referenced. A G92 that changes X, Y or Z marks that axis unhomed (and, for X, clears the homed bit of each active X motor), so its soft limits are off until it is homed again.
 14. **EEPROM** (`settings.cpp`): `EEPROM_VERSION` "V82" -> "V83". This is active and makes the first boot after flashing discard the stored settings and load the defaults. Code that saved the last position (X1, Y, Z, X2) to EEPROM and restored it at boot is still in `settings.cpp/.h`, `stepper.cpp/.h` (`get/set_x2_position_mm`) and `MarlinCore.cpp` (`restore_last_position()` call), but commented out (commit "removed position storing inside the board").
 15. **Anycubic DGUS UI kept** (`ANYCUBIC_LCD_DGUS`): heater max limits defined as 0 when the heater is disabled, `page201_handle` behind `HAS_BED_PROBE` (empty stub otherwise), runout/mesh/temperature-fault code behind `HAS_FILAMENT_SENSOR`, `HAS_MESH`, `HAS_TEMP_HOTEND`, `HAS_TEMP_BED`. `ui_api.cpp`: `getFlowPercentage` returns 100, `setFlow_percent` is a no-op. Probe/leveling pages and the screen flow controls do not work.
 16. **Cosmetic only**: comment-encoding changes in `MarlinCore.cpp` (setup() bullet list) and `Configuration_adv.h` (`BOOT_MARLIN_LOGO_ANIMATED` comment), one blank line in `loop()`.
@@ -100,13 +102,17 @@
 
 ## GUI (`Controller/printer_control_gui.py`)
 - Tkinter GUI over serial at 115200 baud (`FEEDRATE` 1200 mm/min, `POSITION_INTERVAL_MS` 500 for M114 polling).
-- Sends numbered lines with checksums; waits for `ok` (a `busy:` keepalive extends the 10 s `ACK_TIMEOUT_S`), retransmits on timeout or `Resend:`, and resyncs the line number with `M110`.
+- Sends numbered lines with checksums; waits for `ok` (a `busy:` keepalive extends the 10 s `ACK_TIMEOUT_S`), retransmits on timeout or `Resend:`, and resyncs the line number with `M110`. After a timeout retransmit it sends an unnumbered `M118 HOSTSYNC<k>` and discards `ok`/`Resend:` replies until that echo returns, so a late `ok` cannot ack later lines early.
+- Commands must be ASCII: `send()` raises `ValueError` otherwise (the command box shows a warning).
+- A serial error in the reader or writer (e.g. USB unplugged) stops both threads and posts `("lost", ser, error)`; the GUI then disconnects and shows an error.
 - Sends `M120` on connect, so endstops are checked on every move.
+- No command queueing: a button / typed command is only accepted while the printer is free, otherwise it is dropped with "Printer busy, command ignored" in the log (status Ready/Busy next to Connect). Every batch ends with a silent `M400`, so "free" means all its lines are acked and its moves have finished. `PrinterConnection` counts queued/in-flight lines (`busy`; M114 polls are sent with `background=True` and do not count). A "Set gap" is busy across both of its phases.
 - Axis jog: Y+/Y-, Z+/Z-, X-/X+ (both X motors, relative `G1 X` in `G91`). Step size 0.1, 1, 10 or 50 mm. The "Home all" (`G28`) button is commented out.
 - Single X motor: X1-/X1+/X2-/X2+ send `M606 S1 X1|X2`, `G91`, `G1 X…`, `G90`, `M606 S0`. The label "X1 = T0, X2 = T1" is only a naming hint; no `T` command is sent.
+- Gripper gap (X2 - X1, midpoint kept): both jaws move at the same time via `M606 S2`. Open/Close by the jog step: `M606 S2`, `G91`, `G1 X<step/2>`, `G90`, `M606 S0` (`commands.change_gap`). "Set gap": `M606 S2`, `G90`, `G1 X<gap/2>`, `M606 S0`, `M114` (`commands.set_gap`). Needs a firmware with `M606 S2`: older firmware answers "M606 S1 needs X1 or X2", stays in S0, and the following `G1 X` moves both jaws the same way (shifts the gripper instead of closing it). The position panel shows `Gap`.
 - Home axis: Home X1 (`M606 S1 X1`, `G28 X`, `M606 S0`), Home X2 (`M606 H2`), Home Y / Home Z (`G28 Y` / `G28 Z`).
 - Reference: "Set zero here" sends `G92 X0 Y0 Z0` after a confirmation (resets the X1/X2 counters too). The frame is still labelled "no endstops", which predates the endstop wiring.
-- Go to position: X (midpoint), Y, Z. X is sent as a relative move from the current midpoint (keeps the X1/X2 gap), Y/Z absolute.
+- Go to position: X (midpoint), Y, Z, sent as one absolute `G90` + `G1`. In `M606 S0` the firmware's logical X is the midpoint, so this keeps the X1/X2 gap.
 - Position panel: `X mid` = `(X1 + X2) / 2`, `X1`, `X2`, `Y`, `Z` ("Position Commanded (mm)"). The reader thread drops the M114 `Count …` line and hides the `ok` replies of the silent polls.
 
 ## Simulation (`RoboCup/Simulation/`)
@@ -123,7 +129,7 @@
 
 ## Open Items
 - Confirm X direction and X2 homing behaviour on hardware after flashing.
-- Measure and set `X_GRIPPER_MIN_GAP` and confirm `X_GRIPPER_HOME_GAP` (182 mm).
+- Measure and set `X_GRIPPER_MIN_GAP` and confirm `X_GRIPPER_HOME_GAP` (181 mm).
 - Verify the Y (-125..380) and Z (30..255) ranges, `X_BED_SIZE` 180, and X steps/mm 400 against the frame.
 - Verify the Y, Z1 and Z2 endstop logic with `M119`.
 - Update the stale `EXTRUDERS` comment and the GUI "no endstops" label.

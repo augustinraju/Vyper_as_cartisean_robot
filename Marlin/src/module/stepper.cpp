@@ -136,6 +136,10 @@ Stepper stepper; // Singleton
 #if ANY(HAS_EXTRA_ENDSTOPS, Z_STEPPER_AUTO_ALIGN, X_DUAL_STEPPER_DRIVERS)
   bool Stepper::separate_multi_axis = false;
 #endif
+#if ENABLED(X_DUAL_STEPPER_DRIVERS)
+  bool Stepper::separate_x_axis = false;
+  bool Stepper::mirror_x = false;
+#endif
 
 #if HAS_MOTOR_CURRENT_SPI || HAS_MOTOR_CURRENT_PWM
   bool Stepper::initialized; // = false
@@ -351,12 +355,17 @@ xyze_int8_t Stepper::count_direction{0};
   }
 
 #if ENABLED(X_DUAL_STEPPER_DRIVERS)
-  #define X_APPLY_DIR(v,Q) do{ X_DIR_WRITE(v); X2_DIR_WRITE((v) ^ ENABLED(INVERT_X2_VS_X_DIR)); }while(0)
+  // mirror_x (M606 S2) reverses X1 only: the grippers then move in opposite directions
+  #define X_APPLY_DIR(v,Q) do{ X_DIR_WRITE((v) ^ mirror_x); X2_DIR_WRITE((v) ^ ENABLED(INVERT_X2_VS_X_DIR)); }while(0)
   #if ENABLED(X_DUAL_ENDSTOPS)
     #define X_APPLY_STEP(v,Q) DUAL_ENDSTOP_APPLY_STEP(X,v)
   #else
-    // Honors locked_X_motor / locked_X2_motor when separate_multi_axis is set (M606 S1)
-    #define X_APPLY_STEP(v,Q) do{ DUAL_SEPARATE_APPLY_STEP(X,v) }while(0)
+    // Honors locked_X_motor / locked_X2_motor when separate_x_axis is set (M606 S1).
+    // Uses its own flag so the X lock never touches the Z multi-endstop logic.
+    #define X_APPLY_STEP(v,Q) do{ \
+      if (x1_active()) X_STEP_WRITE(v); \
+      if (x2_active()) X2_STEP_WRITE(v); \
+    }while(0)
   #endif
 #elif ENABLED(DUAL_X_CARRIAGE)
   // INVERT_X2_VS_X_DIR flips the X2 direction signal when the X2 motor is wired reversed.
@@ -1560,10 +1569,11 @@ void Stepper::pulse_phase_isr() {
     #define _INVERT_STEP_PIN(AXIS) INVERT_## AXIS ##_STEP_PIN
 
     #if ENABLED(X_DUAL_STEPPER_DRIVERS)
-      // Advance each X motor's own count, skipping a motor that M606 has locked
+      // Advance each X motor's own count, skipping a motor that M606 has locked.
+      // In mirror mode X1 steps against the logical X direction.
       #define COUNT_DUAL_X_STEP(AXIS) do{ if (_AXIS(AXIS) == X_AXIS) { \
-        if (!(separate_multi_axis && locked_X_motor))  count_position_x1 += count_direction[X_AXIS]; \
-        if (!(separate_multi_axis && locked_X2_motor)) count_position_x2 += count_direction[X_AXIS]; \
+        if (x1_active()) count_position_x1 += mirror_x ? -count_direction[X_AXIS] : count_direction[X_AXIS]; \
+        if (x2_active()) count_position_x2 += count_direction[X_AXIS]; \
       } }while(0)
     #else
       #define COUNT_DUAL_X_STEP(AXIS) do{}while(0)
@@ -2646,10 +2656,10 @@ void Stepper::_set_position(const int32_t &a, const int32_t &b, const int32_t &c
   #if ENABLED(X_DUAL_STEPPER_DRIVERS)
     // Shift the active X motor(s) by the change of the logical X. Resets that leave X
     // alone (Y/Z homing, G92 Y) keep both counters, and a reset on one motor (M606 S1)
-    // keeps the other motor's counter.
+    // keeps the other motor's counter. Mirror mode: X1 moves the other way.
     if (!dual_x_hold_counts) {
       const int32_t dx = count_position.x - old_x;
-      if (x1_active()) count_position_x1 += dx;
+      if (x1_active()) count_position_x1 += mirror_x ? -dx : dx;
       if (x2_active()) count_position_x2 += dx;
     }
   #endif
@@ -2694,7 +2704,7 @@ void Stepper::set_axis_position(const AxisEnum a, const int32_t &v) {
   #if ENABLED(X_DUAL_STEPPER_DRIVERS)
     if (a == X_AXIS && !dual_x_hold_counts) {
       const int32_t dx = v - count_position.x;   // Same rule as _set_position
-      if (x1_active()) count_position_x1 += dx;
+      if (x1_active()) count_position_x1 += mirror_x ? -dx : dx;
       if (x2_active()) count_position_x2 += dx;
     }
   #endif
@@ -2790,6 +2800,7 @@ void Stepper::report_positions() {
   }
 
   int32_t Stepper::dual_x_logical_steps() {
+    if (mirror_x) return (count_position_x2 - count_position_x1) / 2;  // half the gap
     const bool a1 = x1_active(), a2 = x2_active();
     if (a1 && !a2) return count_position_x1;
     if (a2 && !a1) return count_position_x2;

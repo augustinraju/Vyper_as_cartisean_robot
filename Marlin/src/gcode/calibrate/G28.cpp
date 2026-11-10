@@ -387,7 +387,12 @@ void GcodeSuite::G28() {
           dual_x_set_homed(1, true);
         }
 
-        if (home_x2) home_x2_to_max();  // Locks X1; ends with both X motors unlocked
+        // Locks X1; ends with both X motors unlocked. A failure stops G28 like an X1 failure.
+        if (home_x2 && !home_x2_to_max()) {
+          homing_state = HOMING_FAILED_X;
+          kill(GET_TEXT(MSG_KILL_HOMING_FAILED), "X2");
+          return;
+        }
 
       #else
 
@@ -444,7 +449,6 @@ void GcodeSuite::G28() {
 
     sync_plan_position();
 
-    // Z homing toggles separate_multi_axis, which also drives the X motor locks.
     // End in M606 S0 with the logical X at the gripper midpoint.
     TERN_(X_DUAL_STEPPER_DRIVERS, dual_x_select(0));
 

@@ -32,12 +32,14 @@ uint8_t do_homing_move(const AxisEnum axis, const float distance, const feedRate
 /**
  * Shared X frame of the two grippers:
  *   X1's switch (X min) is X_MIN_POS, X2's switch (X max) is X2_SWITCH_POS,
- *   X_GRIPPER_HOME_GAP further on. After G28: X1 = 0, X2 = 182, logical X = 91.
+ *   X_GRIPPER_HOME_GAP further on. After G28: X1 = 0, X2 = 181, logical X = 91.
  *
  * Logical X (G1 X, M114 X:) depends on the M606 mode:
  *   M606 S0    : midpoint of X1 and X2. Both move, the gap stays the same.
  *   M606 S1 X1 : X1's position. Only X1 moves.
  *   M606 S1 X2 : X2's position. Only X2 moves.
+ *   M606 S2    : half the gap, (X2 - X1) / 2. Both move at once in opposite
+ *                directions (+X opens, -X closes), the midpoint stays the same.
  * Stepper::_set_position shifts the active motor counters by the change of the
  * logical X, so the mapping holds until the mode changes. dual_x_select() changes
  * the mode and re-derives the logical X from the X1/X2 counters.
@@ -51,6 +53,9 @@ void dual_x_set_homed(const uint8_t motor, const bool homed) {
   if (homed) dual_x_homed_bits |= bit; else dual_x_homed_bits &= ~bit;
 }
 
+// Called from DISABLE_AXIS_X (M18/M84, stepper timeout, kill): the grippers can be moved by hand
+void dual_x_clear_homed() { dual_x_homed_bits = 0; }
+
 // Set the logical X from the X1/X2 counters for the current mode. The counters stay.
 static void dual_x_sync_logical() {
   current_position.x = stepper.dual_x_logical_steps() / planner.settings.axis_steps_per_mm[X_AXIS];
@@ -61,9 +66,14 @@ static void dual_x_sync_logical() {
 
 void dual_x_select(const uint8_t motor) {
   planner.synchronize();  // Finish queued motion before changing the locks
-  stepper.set_separate_multi_axis(motor != 0);
+  const bool single = (motor == 1 || motor == 2);
+  stepper.set_separate_x_axis(single);  // Own flag: leaves the Z multi-endstop logic alone
   stepper.set_x_lock(motor == 2);   // Lock X1 when only X2 should move
   stepper.set_x2_lock(motor == 1);  // Lock X2 when only X1 should move
+  stepper.set_mirror_x(motor == DUAL_X_MIRRORED);
+  // The DIR pins are only rewritten when a block changes direction; the mapping of
+  // X1 just changed, so write them now (the planner is empty).
+  stepper.set_directions();
   dual_x_sync_logical();
 }
 
@@ -83,7 +93,12 @@ bool dual_x_motion_limits(float &lo, float &hi) {
               x2 = stepper.x2_steps() / spmm;
   const bool a1 = stepper.x1_active(), a2 = stepper.x2_active();
 
-  if (a1 && !a2) {          // X1 only
+  if (stepper.x_mirrored()) {  // Logical X is half the gap, the midpoint stays put
+    const float mid = (x1 + x2) * 0.5f;
+    lo = (X_GRIPPER_MIN_GAP) * 0.5f;
+    hi = _MIN(mid - (X_MIN_POS), (X2_SWITCH_POS) - mid);
+  }
+  else if (a1 && !a2) {     // X1 only
     lo = X_MIN_POS;
     hi = x2 - (X_GRIPPER_MIN_GAP);
   }
@@ -154,7 +169,9 @@ bool dual_x_motion_limits(float &lo, float &hi) {
  *   M606 S0       : Both X motors move together (default). Clears any single-motor lock.
  *   M606 S1 X1    : Only X1 moves. X2 is locked (its steps are skipped).
  *   M606 S1 X2    : Only X2 moves. X1 is locked.
- *   M606 H2       : Home X2 to its switch at X max (X1 stays put). Ends in M606 S0.
+ *   M606 S2       : Gripper mode. Both move at once, in opposite directions; G1 X is
+ *                   half the gap (G90 G1 X50 = gap 100 mm, G91 G1 X5 = open by 10 mm).
+ *   M606 H2      : Home X2 to its switch at X max (X1 stays put). Ends in M606 S0.
  *
  * G28 / G28 X home X1 to X min and then X2 to X max, each with the other motor locked.
  * With M606 S1 X1 active, G28 X homes only X1; with M606 S1 X2, only X2.
@@ -182,8 +199,13 @@ void GcodeSuite::M606() {
     return;
   }
 
-  if (!parser.intval('S', 0)) {
-    dual_x_select(0);
+  const int mode = parser.intval('S', 0);
+  if (mode == 0 || mode == 2) {
+    dual_x_select(mode == 2 ? DUAL_X_MIRRORED : 0);
+    return;
+  }
+  if (mode != 1) {
+    SERIAL_ECHO_MSG("M606 S must be 0, 1 or 2");
     return;
   }
 

@@ -244,6 +244,14 @@ class Stepper {
     #if ANY(HAS_EXTRA_ENDSTOPS, Z_STEPPER_AUTO_ALIGN, X_DUAL_STEPPER_DRIVERS)
       static bool separate_multi_axis;
     #endif
+    #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+      // M606 S1: honour the X motor locks. Kept apart from separate_multi_axis, which
+      // also switches Z_MULTI_ENDSTOPS into its homing behaviour (per-motor stop at the switch).
+      static bool separate_x_axis;
+      // M606 S2 (gripper mode): X1 runs opposite to the logical X, X2 with it, so both
+      // grippers move at once in opposite directions and the logical X is half the gap.
+      static bool mirror_x;
+    #endif
 
     #if HAS_MOTOR_CURRENT_SPI || HAS_MOTOR_CURRENT_PWM
       #if HAS_MOTOR_CURRENT_PWM
@@ -446,7 +454,8 @@ class Stepper {
       // Position resets shift the counters of the active X motor(s) by the change of the
       // logical X. Set this to change only the logical X (M606 mode switch, M606.cpp).
       static bool dual_x_hold_counts;
-      // Logical X in steps: X1 or X2 when only that motor is active, otherwise their midpoint
+      // Logical X in steps: X1 or X2 when only that motor is active, half the gap in
+      // mirror mode (M606 S2), otherwise their midpoint
       static int32_t dual_x_logical_steps();
       FORCE_INLINE static int32_t x1_steps() { return count_position_x1; }
       FORCE_INLINE static int32_t x2_steps() { return count_position_x2; }
@@ -497,9 +506,15 @@ class Stepper {
     #if EITHER(X_DUAL_ENDSTOPS, X_DUAL_STEPPER_DRIVERS)
       FORCE_INLINE static void set_x_lock(const bool state) { locked_X_motor = state; }
       FORCE_INLINE static void set_x2_lock(const bool state) { locked_X2_motor = state; }
+    #endif
+    #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+      FORCE_INLINE static void set_separate_x_axis(const bool state) { separate_x_axis = state; }
       // True when that X motor steps (not locked by M606 S1)
-      FORCE_INLINE static bool x1_active() { return !(separate_multi_axis && locked_X_motor); }
-      FORCE_INLINE static bool x2_active() { return !(separate_multi_axis && locked_X2_motor); }
+      FORCE_INLINE static bool x1_active() { return !(separate_x_axis && locked_X_motor); }
+      FORCE_INLINE static bool x2_active() { return !(separate_x_axis && locked_X2_motor); }
+      // Call only with the planner empty, then set_directions() to rewrite the DIR pins
+      FORCE_INLINE static void set_mirror_x(const bool state) { mirror_x = state; }
+      FORCE_INLINE static bool x_mirrored() { return mirror_x; }
     #endif
     #if ENABLED(Y_DUAL_ENDSTOPS)
       FORCE_INLINE static void set_y_lock(const bool state) { locked_Y_motor = state; }
