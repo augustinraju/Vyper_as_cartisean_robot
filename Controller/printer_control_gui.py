@@ -280,15 +280,23 @@ class App(tk.Tk):
         ttk.Button(x_motors, text="X2-", width=6, command=lambda: self.jog_x_motor(1, -1)).grid(row=0, column=2, **pad)
         ttk.Button(x_motors, text="X2+", width=6, command=lambda: self.jog_x_motor(1, 1)).grid(row=0, column=3, **pad)
 
+        # Homing per axis (G28 on one axis; X1/X2 use M606 to lock the other X motor)
+        home = ttk.LabelFrame(self, text="Home axis (G28)")
+        home.grid(row=4, column=0, sticky="ew", **pad)
+        for i, axis in enumerate(("X1", "X2", "Y", "Z")):
+            ttk.Button(home, text=f"Home {axis}", width=9,
+                       command=lambda a=axis: self.home_axis(a)).grid(
+                row=0, column=i, padx=6, pady=4)
+
         # Reference (no endstops: position is set by hand)
         ref = ttk.LabelFrame(self, text="Reference (no endstops)")
-        ref.grid(row=4, column=0, sticky="ew", **pad)
+        ref.grid(row=5, column=0, sticky="ew", **pad)
         ttk.Button(ref, text="Set zero here (G92 X0 Y0 Z0)",
                    command=self.set_zero).grid(row=0, column=0, sticky="ew", **pad)
 
         # Manual absolute positioning
         goto = ttk.LabelFrame(self, text="Go to position (mm, relative to zero)")
-        goto.grid(row=5, column=0, sticky="ew", **pad)
+        goto.grid(row=6, column=0, sticky="ew", **pad)
         self.goto_vars = {key: tk.StringVar() for key in ("X", "Y", "Z")}
         for i, (key, var) in enumerate(self.goto_vars.items()):
             label = "X mid:" if key == "X" else f"{key}:"
@@ -302,9 +310,23 @@ class App(tk.Tk):
 
         # Log
         log_frame = ttk.LabelFrame(self, text="Log")
-        log_frame.grid(row=6, column=0, sticky="nsew", **pad)
+        log_frame.grid(row=7, column=0, sticky="nsew", **pad)
         self.log = tk.Text(log_frame, width=44, height=10, state="disabled")
         self.log.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Manual G-code entry (Enter sends, Up/Down recalls earlier commands)
+        cmd = ttk.LabelFrame(self, text="Send command")
+        cmd.grid(row=8, column=0, sticky="ew", **pad)
+        cmd.columnconfigure(0, weight=1)
+        self.cmd_var = tk.StringVar()
+        self.cmd_history: list[str] = []
+        self.cmd_history_pos = 0
+        cmd_entry = ttk.Entry(cmd, textvariable=self.cmd_var, font=("Consolas", 10))
+        cmd_entry.grid(row=0, column=0, sticky="ew", **pad)
+        cmd_entry.bind("<Return>", lambda _e: self.send_typed_command())
+        cmd_entry.bind("<Up>", lambda _e: self._recall_command(-1))
+        cmd_entry.bind("<Down>", lambda _e: self._recall_command(1))
+        ttk.Button(cmd, text="Send", command=self.send_typed_command).grid(row=0, column=1, **pad)
 
     # ---------- Serial ----------
     def refresh_ports(self) -> None:
@@ -332,12 +354,37 @@ class App(tk.Tk):
             return
         self.connect_btn.config(text="Disconnect")
         self.log_line(f"Connected to {port} @ {BAUDRATE}")
+        # Check endstops on every move, not only during G28 (lost on board reset,
+        # so it is re-sent on each connect). Queued; goes out once the board has booted.
+        self.send("M120")
 
     def send(self, line: str) -> None:
         try:
             self.printer.send(line)
         except RuntimeError:
             messagebox.showwarning("Not connected", "Connect to the printer first.")
+
+    def send_typed_command(self) -> None:
+        """Send the line typed in the command box (anything after ';' is a comment)."""
+        line = self.cmd_var.get().split(";", 1)[0].strip()
+        if not line:
+            return
+        if not self.printer.connected:
+            messagebox.showwarning("Not connected", "Connect to the printer first.")
+            return
+        self.send(line)
+        if not self.cmd_history or self.cmd_history[-1] != line:
+            self.cmd_history.append(line)
+        self.cmd_history_pos = len(self.cmd_history)
+        self.cmd_var.set("")
+
+    def _recall_command(self, step: int) -> str:
+        """Up/Down in the command box: walk through earlier commands."""
+        if self.cmd_history:
+            self.cmd_history_pos = max(0, min(len(self.cmd_history), self.cmd_history_pos + step))
+            text = self.cmd_history[self.cmd_history_pos] if self.cmd_history_pos < len(self.cmd_history) else ""
+            self.cmd_var.set(text)
+        return "break"
 
     def jog(self, axis: str, direction: int) -> None:
         distance = float(self.step_var.get()) * direction
@@ -414,6 +461,20 @@ class App(tk.Tk):
         self.send(f"G1 X{distance:.2f} F{FEEDRATE}")
         self.send("G90")
         self.send("M606 S0")  # Back to both motors; waits for the move to finish
+
+    def home_axis(self, axis: str) -> None:
+        """Home one axis. X1 homes to X min, X2 to X max; the other X motor stays put."""
+        if not self.printer.connected:
+            messagebox.showwarning("Not connected", "Connect to the printer first.")
+            return
+        if axis == "X1":
+            self.send("M606 S1 X1")  # Lock X2
+            self.send("G28 X")       # X1 to its switch at X min
+            self.send("M606 S0")  # Queued even if the homing fails, so no motor stays locked
+        elif axis == "X2":
+            self.send("M606 H2")     # X2 to its switch at X max (firmware locks X1, ends in M606 S0)
+        else:
+            self.send(f"G28 {axis}")
 
     # ---------- Log / queue ----------
     def log_line(self, text: str) -> None:

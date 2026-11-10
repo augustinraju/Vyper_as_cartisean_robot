@@ -65,6 +65,10 @@
 #define DEBUG_OUT ENABLED(DEBUG_LEVELING_FEATURE)
 #include "../../core/debug_out.h"
 
+#if ENABLED(X_DUAL_STEPPER_DRIVERS) && DISABLED(X_DUAL_ENDSTOPS) && HAS_X_MAX
+  bool home_x2_to_max();  // M606.cpp: home X2 to its switch at X max
+#endif
+
 #if ENABLED(QUICK_HOME)
 
   static void quick_home_xy() {
@@ -368,6 +372,23 @@ void GcodeSuite::G28() {
         // Consider the active extruder to be in its "parked" position
         idex_set_parked();
 
+      #elif ENABLED(X_DUAL_STEPPER_DRIVERS) && DISABLED(X_DUAL_ENDSTOPS) && HAS_X_MAX
+
+        // Gantry robot: X1 homes to its switch at X min, then X2 to its switch at
+        // X max, each with the other motor locked. Applies to every G28 source
+        // (LCD, host, M1000). An active M606 S1 lock limits homing to that motor.
+        const bool home_x1 = stepper.x1_active(), home_x2 = stepper.x2_active();
+
+        if (home_x1) {
+          dual_x_select(1);            // X2 stays put; logical X = X1
+          homing_state = HOMING_X;
+          homeaxis(X_AXIS);            // X1 = X_MIN_POS
+          if (HOMING_FAILED_X == homing_state) { dual_x_set_homed(1, false); return; }
+          dual_x_set_homed(1, true);
+        }
+
+        if (home_x2) home_x2_to_max();  // Locks X1; ends with both X motors unlocked
+
       #else
 
         homing_state = HOMING_X;
@@ -422,6 +443,10 @@ void GcodeSuite::G28() {
     #endif
 
     sync_plan_position();
+
+    // Z homing toggles separate_multi_axis, which also drives the X motor locks.
+    // End in M606 S0 with the logical X at the gripper midpoint.
+    TERN_(X_DUAL_STEPPER_DRIVERS, dual_x_select(0));
 
   #endif // !DELTA (G28)
 

@@ -443,6 +443,13 @@ class Stepper {
     static void report_positions();
     #if ENABLED(X_DUAL_STEPPER_DRIVERS)
       static void report_dual_x_positions();
+      // Position resets shift the counters of the active X motor(s) by the change of the
+      // logical X. Set this to change only the logical X (M606 mode switch, M606.cpp).
+      static bool dual_x_hold_counts;
+      // Logical X in steps: X1 or X2 when only that motor is active, otherwise their midpoint
+      static int32_t dual_x_logical_steps();
+      FORCE_INLINE static int32_t x1_steps() { return count_position_x1; }
+      FORCE_INLINE static int32_t x2_steps() { return count_position_x2; }
       // static float get_x2_position_mm();            // X2 motor position (mm), for EEPROM save
       // static void set_x2_position_mm(const float &mm); // Set X2 motor position (mm), for boot restore
     #endif
@@ -490,6 +497,9 @@ class Stepper {
     #if EITHER(X_DUAL_ENDSTOPS, X_DUAL_STEPPER_DRIVERS)
       FORCE_INLINE static void set_x_lock(const bool state) { locked_X_motor = state; }
       FORCE_INLINE static void set_x2_lock(const bool state) { locked_X2_motor = state; }
+      // True when that X motor steps (not locked by M606 S1)
+      FORCE_INLINE static bool x1_active() { return !(separate_multi_axis && locked_X_motor); }
+      FORCE_INLINE static bool x2_active() { return !(separate_multi_axis && locked_X2_motor); }
     #endif
     #if ENABLED(Y_DUAL_ENDSTOPS)
       FORCE_INLINE static void set_y_lock(const bool state) { locked_Y_motor = state; }

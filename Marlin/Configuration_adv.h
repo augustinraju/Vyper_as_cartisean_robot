@@ -555,11 +555,21 @@
 #define X_DUAL_STEPPER_DRIVERS
 #if ENABLED(X_DUAL_STEPPER_DRIVERS)
   #define INVERT_X2_VS_X_DIR    // Enable if X2 direction signal is opposite to X
+  // Off: X1 and X2 home in opposite directions. X1's switch is X min (G28 X with
+  // M606 S1 X1), X2's switch is X max (M606 H2). X_DUAL_ENDSTOPS would home both
+  // the same way.
   //#define X_DUAL_ENDSTOPS
   #if ENABLED(X_DUAL_ENDSTOPS)
     #define X2_USE_ENDSTOP _XMAX_
     #define X2_ENDSTOP_ADJUSTMENT  0
   #endif
+
+  // Gantry robot gripper geometry (M606.cpp). X1 and X2 share one X frame:
+  // X1's switch is X_MIN_POS, X2's switch is X_MIN_POS + X_GRIPPER_HOME_GAP.
+  // Logical X is the midpoint of the grippers (M606 S0), or the single active gripper (M606 S1).
+  // After G28 both grippers are limited to the range between the two switches.
+  #define X_GRIPPER_HOME_GAP  182   // (mm) Distance between the X1 and X2 grippers when both are homed
+  #define X_GRIPPER_MIN_GAP     0   // (mm) Closest the grippers may get in single-motor moves. MEASURE and set!
 
   // X2 uses the E0 driver (extension-cable port); Z2 uses the E1 driver (ZR connector).
   // Z1 pins are untouched.
@@ -597,11 +607,13 @@
   //#define INVERT_Z3_VS_Z_DIR
   //#define INVERT_Z4_VS_Z_DIR
 
-  // Disabled: the Z2 endstop (ZR_STOP) shares the X-MAX pin (PC6), which DUAL_X_CARRIAGE needs for X2 homing.
-  // Z2 still moves with Z1, but Z homes on Z1 (ZL) only.
-  //#define Z_MULTI_ENDSTOPS
+  // G28 Z homes Z1 and Z2 together, each stopping at its own switch.
+  #define Z_MULTI_ENDSTOPS
   #if ENABLED(Z_MULTI_ENDSTOPS)
-    #define Z2_USE_ENDSTOP          _XMAX_
+    // The real pin is Z2_MIN_PIN (PC6, ZR connector) in pins_AC_TRI_F1_V1.h.
+    // Marlin 2.0 still requires a plug name here; _ZMAX_ is only a placeholder (Z_MAX_PIN is -1).
+    #define Z2_USE_ENDSTOP          _ZMAX_
+    #define Z2_MIN_ENDSTOP_INVERTING false // Same logic as Z1 (Z_MIN_ENDSTOP_INVERTING)
     #define Z2_ENDSTOP_ADJUSTMENT   0
     #if NUM_Z_STEPPER_DRIVERS >= 3
       #define Z3_USE_ENDSTOP        _YMAX_

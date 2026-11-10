@@ -648,14 +648,24 @@ void restore_feedrate_and_scaling() {
 
     #else
 
-      if (axis_was_homed(X_AXIS)) {
-        #if !HAS_SOFTWARE_ENDSTOPS || ENABLED(MIN_SOFTWARE_ENDSTOP_X)
-          NOLESS(target.x, soft_endstop.min.x);
-        #endif
-        #if !HAS_SOFTWARE_ENDSTOPS || ENABLED(MAX_SOFTWARE_ENDSTOP_X)
-          NOMORE(target.x, soft_endstop.max.x);
-        #endif
-      }
+      #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+        // Gantry robot: keep X1 at or above its switch, X2 at or below its switch,
+        // and the grippers apart (M606.cpp). Active once both X motors are homed.
+        float x_lo, x_hi;
+        if (dual_x_motion_limits(x_lo, x_hi)) {
+          NOLESS(target.x, x_lo);
+          NOMORE(target.x, x_hi);
+        }
+      #else
+        if (axis_was_homed(X_AXIS)) {
+          #if !HAS_SOFTWARE_ENDSTOPS || ENABLED(MIN_SOFTWARE_ENDSTOP_X)
+            NOLESS(target.x, soft_endstop.min.x);
+          #endif
+          #if !HAS_SOFTWARE_ENDSTOPS || ENABLED(MAX_SOFTWARE_ENDSTOP_X)
+            NOMORE(target.x, soft_endstop.max.x);
+          #endif
+        }
+      #endif
 
       if (axis_was_homed(Y_AXIS)) {
         #if !HAS_SOFTWARE_ENDSTOPS || ENABLED(MIN_SOFTWARE_ENDSTOP_Y)

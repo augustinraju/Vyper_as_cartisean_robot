@@ -239,6 +239,7 @@ xyz_long_t Stepper::endstops_trigsteps;
 xyze_long_t Stepper::count_position{0};
 #if ENABLED(X_DUAL_STEPPER_DRIVERS)
   int32_t Stepper::count_position_x1 = 0, Stepper::count_position_x2 = 0;
+  bool Stepper::dual_x_hold_counts = false;
 #endif
 xyze_int8_t Stepper::count_direction{0};
 
@@ -2622,6 +2623,9 @@ void Stepper::init() {
  * derive the current XYZ position later on.
  */
 void Stepper::_set_position(const int32_t &a, const int32_t &b, const int32_t &c, const int32_t &e) {
+  #if ENABLED(X_DUAL_STEPPER_DRIVERS)
+    const int32_t old_x = count_position.x;
+  #endif
   #if CORE_IS_XY
     // corexy positioning
     // these equations follow the form of the dA and dB equations on https://www.corexy.com/theory.html
@@ -2640,7 +2644,14 @@ void Stepper::_set_position(const int32_t &a, const int32_t &b, const int32_t &c
   #endif
   count_position.e = e;
   #if ENABLED(X_DUAL_STEPPER_DRIVERS)
-    count_position_x1 = count_position_x2 = count_position.x;
+    // Shift the active X motor(s) by the change of the logical X. Resets that leave X
+    // alone (Y/Z homing, G92 Y) keep both counters, and a reset on one motor (M606 S1)
+    // keeps the other motor's counter.
+    if (!dual_x_hold_counts) {
+      const int32_t dx = count_position.x - old_x;
+      if (x1_active()) count_position_x1 += dx;
+      if (x2_active()) count_position_x2 += dx;
+    }
   #endif
 }
 
@@ -2680,10 +2691,14 @@ void Stepper::set_axis_position(const AxisEnum a, const int32_t &v) {
     const bool was_enabled = suspend();
   #endif
 
-  count_position[a] = v;
   #if ENABLED(X_DUAL_STEPPER_DRIVERS)
-    if (a == X_AXIS) count_position_x1 = count_position_x2 = v;
+    if (a == X_AXIS && !dual_x_hold_counts) {
+      const int32_t dx = v - count_position.x;   // Same rule as _set_position
+      if (x1_active()) count_position_x1 += dx;
+      if (x2_active()) count_position_x2 += dx;
+    }
   #endif
+  count_position[a] = v;
 
   #ifdef __AVR__
     // Reenable Stepper ISR
@@ -2772,6 +2787,13 @@ void Stepper::report_positions() {
   void Stepper::report_dual_x_positions() {
     const float spmm = planner.settings.axis_steps_per_mm[X_AXIS];
     SERIAL_ECHOLNPAIR("X1:", count_position_x1 / spmm, " X2:", count_position_x2 / spmm);
+  }
+
+  int32_t Stepper::dual_x_logical_steps() {
+    const bool a1 = x1_active(), a2 = x2_active();
+    if (a1 && !a2) return count_position_x1;
+    if (a2 && !a1) return count_position_x2;
+    return (count_position_x1 + count_position_x2) / 2;
   }
 
   // float Stepper::get_x2_position_mm() {

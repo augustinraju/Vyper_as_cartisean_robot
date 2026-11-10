@@ -61,11 +61,14 @@
 #define Z_STOP_PIN                          ZL_STOP_PIN
 #endif
 
-#define X_MIN_PIN                           PA7
-#define X_MAX_PIN                           PC6
-#define Y_MIN_PIN                           PC5
+// Gantry-robot wiring:
+#define X_MIN_PIN                           PA7   // X endstop connector -> X1 switch (X1 homes to min: M606 S1 X1 + G28 X)
+#define X_MAX_PIN                           PA5   // "Filament" connector -> X2 switch at X max (M606 H2).
+                                                  // Active high: switch between the +5V pin and S (board pulls S low)
+#define Y_MIN_PIN                           PC5   // Y endstop connector
+#define Z_MIN_PIN                           PB2   // ZL endstop connector -> Z1 switch
+#define Z2_MIN_PIN                          PC6   // ZR endstop connector -> Z2 switch (Z_MULTI_ENDSTOPS)
 #define Y_MAX_PIN                           -1
-#define Z_MIN_PIN                           PB2
 #define Z_MAX_PIN                           -1
 
 //

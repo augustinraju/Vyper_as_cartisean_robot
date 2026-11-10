@@ -535,6 +535,11 @@ void Endstops::update() {
     #define E0_ACTIVE stepper.last_moved_extruder == 0
     #define X_MIN_TEST() ((X_HOME_DIR < 0 && E0_ACTIVE) || (X2_HOME_DIR < 0 && !E0_ACTIVE))
     #define X_MAX_TEST() ((X_HOME_DIR > 0 && E0_ACTIVE) || (X2_HOME_DIR > 0 && !E0_ACTIVE))
+  #elif ENABLED(X_DUAL_STEPPER_DRIVERS) && DISABLED(X_DUAL_ENDSTOPS)
+    // Gantry robot: X min is X1's switch, X max is X2's switch. While one motor is
+    // locked (M606 S1), its switch must not stop the other motor.
+    #define X_MIN_TEST() stepper.x1_active()
+    #define X_MAX_TEST() stepper.x2_active()
   #else
     #define X_MIN_TEST() true
     #define X_MAX_TEST() true
