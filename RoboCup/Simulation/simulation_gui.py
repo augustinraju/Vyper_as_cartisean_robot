@@ -24,12 +24,12 @@ import time
 import pybullet as p
 import pybullet_data
 
+from build_urdf import build as build_urdf
 from plan_gripper_move import STEP, GripperPlanner, add_bed_obstacle, update_bed_obstacles
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Translation"))
 from sim_link import sim_endpoint  # noqa: E402  (standard library only)
 
-URDF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vyper.urdf")
 DT = 1 / 240
 MOVE_SPEED = 0.05  # planned-move speed in (x, y, z) space [m/s]
 
@@ -61,6 +61,7 @@ def main():
     ap.add_argument("--opengl2", action="store_true",
                     help="OpenGL2 renderer: unclipped GUI text, no textures/shadows")
     args = ap.parse_args()
+    urdf = build_urdf()  # vyper.urdf from the xacro, joint limits = printer limits
 
     gui = p.connect(p.GUI, options="--opengl2" if args.opengl2 else "")
     # Hide the (empty) synthetic-camera preview panels drawn over the left of the view
@@ -70,12 +71,12 @@ def main():
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     p.setGravity(0, 0, 0)
     p.loadURDF("plane.urdf")
-    robot = p.loadURDF(URDF, useFixedBase=True)
+    robot = p.loadURDF(urdf, useFixedBase=True)
 
     # Headless copy of the robot used only for collision checking while planning,
     # so planning never disturbs the simulated robot shown in the GUI.
     plan_cid = p.connect(p.DIRECT)
-    plan_robot = p.loadURDF(URDF, useFixedBase=True, physicsClientId=plan_cid)
+    plan_robot = p.loadURDF(urdf, useFixedBase=True, physicsClientId=plan_cid)
 
     # Same Lego stack in both worlds: shown in the GUI, avoided by the planner
     legos = add_lego_stack(gui)

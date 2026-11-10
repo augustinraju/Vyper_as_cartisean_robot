@@ -1,0 +1,351 @@
+<?xml version="1.0"?>
+<!--
+  Simplified Anycubic Vyper (Cartesian, bed-slinger) built from primitives.
+  No official URDF exists; dimensions approximate (build volume 245 x 245 x 260 mm).
+  Units: metres.
+
+  SOURCE FILE: edit this, not vyper.urdf. vyper.urdf is generated from it by
+  build_urdf.py (run automatically by simulation_gui.py and plan_gripper_move.py).
+  The prismatic joint limits are xacro args, filled in by build_urdf.py from the
+  printer firmware limits (Marlin/Configuration*.h) converted to sim joint values with
+  Translation/sim_to_printer.py, so the sim can only reach what the printer accepts.
+  To render by hand:
+    xacro vyper.urdf.xacro x_lower:=-0.0905 x_upper:=0.0905 y_lower:=-0.1275 \
+        y_upper:=0.1275 z_lower:=0 z_upper:=0.225 -o vyper.urdf
+
+  Kinematic structure (matches the real machine):
+    base_link
+      ├─ frame      (fixed)     : two vertical uprights + top bar, bolted to the base
+      ├─ bed        (y_axis)    : heated bed slides front/back on the base
+      └─ x_gantry   (z_axis)    : X beam rides up/down the fixed uprights (dual Z lead screws)
+           ├─ left_jaw  (x2_axis) : driven by X2 motor (mirrored) via the X spindle
+           └─ right_jaw (x1_axis) : driven by X1 motor via the X spindle
+  Names match the printer: X1 homes to printer X min, which is on the sim's +X (right)
+  side, so printer X runs along world -X. Both X joints therefore use axis -X: a
+  positive joint value moves the jaw toward world -X, and joint values increase in
+  the same direction as printer X (see Translation/sim_to_printer.py).
+
+  Gripper = the two jaws; fingers point along +Y. Each jaw travels from its motor
+  up to the other jaw. The X1 (right) jaw stays between the X2 jaw and world +X, so
+  jaws must not cross: x1_axis <= x2_axis (enforced in simulation_gui.py).
+  Zero pose: jaws closed at beam centre.
+  Each jaw: nut block on the spindle -> connector hanging down -> 2.5 cm finger.
+  X-motor top to finger bottom = 9 cm.
+-->
+<robot name="anycubic_vyper" xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <!-- Joint limits [m], sim joint values; no defaults: build_urdf.py must pass them -->
+  <xacro:arg name="x_lower" default=""/>
+  <xacro:arg name="x_upper" default=""/>
+  <xacro:arg name="y_lower" default=""/>
+  <xacro:arg name="y_upper" default=""/>
+  <xacro:arg name="z_lower" default=""/>
+  <xacro:arg name="z_upper" default=""/>
+
+  <material name="grey"><color rgba="0.25 0.25 0.28 1"/></material>
+  <material name="black"><color rgba="0.05 0.05 0.05 1"/></material>
+  <material name="orange"><color rgba="1.0 0.5 0.0 1"/></material>
+  <material name="blue"><color rgba="0.2 0.4 0.9 1"/></material>
+  <material name="silver"><color rgba="0.75 0.75 0.78 1"/></material>
+
+  <!-- Base frame (origin at base centre, on the floor) -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.025"/>
+      <geometry><box size="0.35 0.355 0.05"/></geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.025"/>
+      <geometry><box size="0.35 0.355 0.05"/></geometry>
+    </collision>
+    <inertial><mass value="5"/><inertia ixx="0.1" iyy="0.1" izz="0.1" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+
+  <!-- Fixed frame: uprights + top bar + dual Z lead screws (do NOT move with Z) -->
+  <link name="frame">
+    <!-- left upright -->
+    <visual>
+      <origin xyz="-0.1565 0 0.225"/>
+      <geometry><box size="0.04 0.02 0.45"/></geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.1565 0 0.225"/>
+      <geometry><box size="0.04 0.02 0.45"/></geometry>
+    </collision>
+    <!-- right upright -->
+    <visual>
+      <origin xyz="0.1565 0 0.225"/>
+      <geometry><box size="0.04 0.02 0.45"/></geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0.1565 0 0.225"/>
+      <geometry><box size="0.04 0.02 0.45"/></geometry>
+    </collision>
+    <!-- top bar -->
+    <visual>
+      <origin xyz="0 0 0.46"/>
+      <geometry><box size="0.35 0.02 0.02"/></geometry>
+      <material name="grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.46"/>
+      <geometry><box size="0.35 0.02 0.02"/></geometry>
+    </collision>
+    <!-- left Z lead screw -->
+    <visual>
+      <origin xyz="-0.1565 -0.035 0.265"/>
+      <geometry><cylinder radius="0.004" length="0.41"/></geometry>
+      <material name="silver"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.1565 -0.035 0.265"/>
+      <geometry><cylinder radius="0.004" length="0.41"/></geometry>
+    </collision>
+    <!-- right Z lead screw -->
+    <visual>
+      <origin xyz="0.1565 -0.035 0.265"/>
+      <geometry><cylinder radius="0.004" length="0.41"/></geometry>
+      <material name="silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0.1565 -0.035 0.265"/>
+      <geometry><cylinder radius="0.004" length="0.41"/></geometry>
+    </collision>
+    <!-- left Z motor -->
+    <visual>
+      <origin xyz="-0.1565 -0.035 0.02"/>
+      <geometry><box size="0.042 0.042 0.04"/></geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.1565 -0.035 0.02"/>
+      <geometry><box size="0.042 0.042 0.04"/></geometry>
+    </collision>
+    <!-- right Z motor -->
+    <visual>
+      <origin xyz="0.1565 -0.035 0.02"/>
+      <geometry><box size="0.042 0.042 0.04"/></geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0.1565 -0.035 0.02"/>
+      <geometry><box size="0.042 0.042 0.04"/></geometry>
+    </collision>
+    <inertial><mass value="2"/><inertia ixx="0.05" iyy="0.05" izz="0.05" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="frame_mount" type="fixed">
+    <parent link="base_link"/><child link="frame"/>
+    <!-- frame sits on the base top -->
+    <origin xyz="0 -0.01 0.05"/>
+  </joint>
+
+  <!-- Y axis: heated bed -->
+  <link name="bed">
+    <visual>
+      <origin xyz="0 0 0.0"/>
+      <geometry><box size="0.28 0.28 0.02"/></geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.0"/>
+      <geometry><box size="0.25 0.27 0.006"/></geometry>
+    </collision>
+    <inertial><mass value="0.5"/><inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="y_axis" type="prismatic">
+    <parent link="base_link"/><child link="bed"/>
+    <origin xyz="0 0 0.08"/>
+    <axis xyz="0 1 0"/>
+    <!-- printer Y_MIN_POS..Y_MAX_POS through sim_to_printer.Y_MAP -->
+    <limit lower="$(arg y_lower)" upper="$(arg y_upper)" effort="100" velocity="1.0"/>
+  </joint>
+
+  <!-- Z axis: X gantry beam with the two Z carriages that ride the uprights.
+       Link origin = X spindle height. Beam and carriages span z = -0.054 .. +0.02
+       (7.4 cm tall) so they cover the long gripper arms hanging below the spindle. -->
+  <link name="x_gantry">
+    <!-- X beam -->
+    <visual>
+      <origin xyz="0 0.03 -0.017"/>
+      <geometry><box size="0.35 0.02 0.074"/></geometry>
+      <material name="orange"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0.03 -0.017"/>
+      <geometry><box size="0.35 0.02 0.074"/></geometry>
+    </collision>
+    <!-- left Z carriage: wraps the left pillar (x = -0.1565) and its Z lead screw behind it (y = -0.035), reaches forward to the beam -->
+    <visual>
+      <origin xyz="-0.1565 -0.0125 -0.017"/>
+      <geometry><box size="0.05 0.065 0.074"/></geometry>
+      <material name="orange"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.1565 -0.0125 -0.017"/>
+      <geometry><box size="0.05 0.065 0.074"/></geometry>
+    </collision>
+    <!-- right Z carriage: wraps the right pillar (x = 0.1565) and its Z lead screw -->
+    <visual>
+      <origin xyz="0.1565 -0.0125 -0.017"/>
+      <geometry><box size="0.05 0.065 0.074"/></geometry>
+      <material name="orange"/>
+    </visual>
+    <collision>
+      <origin xyz="0.1565 -0.0125 -0.017"/>
+      <geometry><box size="0.05 0.065 0.074"/></geometry>
+    </collision>
+    <!-- X2 motor: left side, mirrored, shaft facing inward -->
+    <visual>
+      <origin xyz="-0.1565 0.06 0"/>
+      <geometry><box size="0.042 0.042 0.042"/></geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.1565 0.06 0"/>
+      <geometry><box size="0.042 0.042 0.042"/></geometry>
+    </collision>
+    <!-- X1 motor: right side, shaft facing inward -->
+    <visual>
+      <origin xyz="0.1565 0.06 0"/>
+      <geometry><box size="0.042 0.042 0.042"/></geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0.1565 0.06 0"/>
+      <geometry><box size="0.042 0.042 0.042"/></geometry>
+    </collision>
+    <!-- X spindle (T8-style lead screw, same as Z) running in front of both pillars, motor to motor -->
+    <visual>
+      <origin xyz="0 0.06 0" rpy="0 1.5708 0"/>
+      <geometry><cylinder radius="0.004" length="0.355"/></geometry>
+      <material name="silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0.06 0" rpy="0 1.5708 0"/>
+      <geometry><cylinder radius="0.004" length="0.355"/></geometry>
+    </collision>
+    <inertial><mass value="1"/><inertia ixx="0.01" iyy="0.01" izz="0.01" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="z_axis" type="prismatic">
+    <parent link="frame"/><child link="x_gantry"/>
+    <!-- at z = 0 the finger undersides are ~2.5 mm above the bed surface -->
+    <origin xyz="0 0 0.1115"/>
+    <axis xyz="0 0 1"/>
+    <!-- printer Z_MIN_POS..Z_MAX_POS through sim_to_printer.Z_MAP -->
+    <limit lower="$(arg z_lower)" upper="$(arg z_upper)" effort="100" velocity="0.2"/>
+  </joint>
+
+  <!-- X axis: two gripper jaws on the X spindle, one per X motor.
+       Each jaw = nut block on the spindle + connector + a finger pointing along +Y.
+         X1 + X2 together (M606 S0) -> closed gripper translates along X
+         X1 or X2 alone  (M606 S1)  -> jaws open / close
+       Joint value = jaw inner-face position along -X (world x = -joint). Both 0 = jaws
+       touching at beam centre.
+       Gap = x2_axis - x1_axis >= 0 (= world x of right jaw minus left jaw). The no-crossing rule
+       (left jaw stops at right jaw and vice versa) is enforced by simulation_gui.py. -->
+  <link name="left_jaw">
+    <!-- nut block riding the spindle -->
+    <visual>
+      <origin xyz="-0.015 0.06 0"/>
+      <geometry><box size="0.03 0.03 0.03"/></geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.015 0.06 0"/>
+      <geometry><box size="0.03 0.03 0.03"/></geometry>
+    </collision>
+    <!-- lead-screw nut -->
+    <visual>
+      <origin xyz="-0.015 0.06 0" rpy="0 1.5708 0"/>
+      <geometry><cylinder radius="0.008" length="0.032"/></geometry>
+      <material name="orange"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.015 0.06 0" rpy="0 1.5708 0"/>
+      <geometry><cylinder radius="0.008" length="0.032"/></geometry>
+    </collision>
+    <!-- connector: hangs from the nut block bottom (z = -0.015) down to the finger top (z = -0.044) -->
+    <visual>
+      <origin xyz="-0.015 0.06 -0.0295"/>
+      <geometry><box size="0.03 0.02 0.029"/></geometry>
+      <material name="silver"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.015 0.06 -0.0295"/>
+      <geometry><box size="0.03 0.02 0.029"/></geometry>
+    </collision>
+    <!-- finger, pointing +Y; 2.5 cm tall, z = -0.044 .. -0.069 below spindle axis, inner face at link x = 0 -->
+    <visual>
+      <origin xyz="-0.015 0.095 -0.0565"/>
+      <geometry><box size="0.03 0.08 0.025"/></geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="-0.015 0.095 -0.0565"/>
+      <geometry><box size="0.03 0.08 0.025"/></geometry>
+    </collision>
+    <inertial><mass value="0.1"/><inertia ixx="0.0002" iyy="0.0002" izz="0.0002" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="x2_axis" type="prismatic">
+    <parent link="x_gantry"/><child link="left_jaw"/>
+    <!-- driven by X2 (left motor) -->
+    <origin xyz="0 0 0"/>
+    <axis xyz="-1 0 0"/>
+    <!-- printer X range X_MIN_POS..X_MIN_POS + X_GRIPPER_HOME_GAP through sim_to_printer.X_MAP -->
+    <limit lower="$(arg x_lower)" upper="$(arg x_upper)" effort="100" velocity="1.0"/>
+  </joint>
+
+  <link name="right_jaw">
+    <!-- nut block riding the spindle -->
+    <visual>
+      <origin xyz="0.015 0.06 0"/>
+      <geometry><box size="0.03 0.03 0.03"/></geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <origin xyz="0.015 0.06 0"/>
+      <geometry><box size="0.03 0.03 0.03"/></geometry>
+    </collision>
+    <!-- lead-screw nut -->
+    <visual>
+      <origin xyz="0.015 0.06 0" rpy="0 1.5708 0"/>
+      <geometry><cylinder radius="0.008" length="0.032"/></geometry>
+      <material name="orange"/>
+    </visual>
+    <collision>
+      <origin xyz="0.015 0.06 0" rpy="0 1.5708 0"/>
+      <geometry><cylinder radius="0.008" length="0.032"/></geometry>
+    </collision>
+    <!-- connector: hangs from the nut block bottom (z = -0.015) down to the finger top (z = -0.044) -->
+    <visual>
+      <origin xyz="0.015 0.06 -0.0295"/>
+      <geometry><box size="0.03 0.02 0.029"/></geometry>
+      <material name="silver"/>
+    </visual>
+    <collision>
+      <origin xyz="0.015 0.06 -0.0295"/>
+      <geometry><box size="0.03 0.02 0.029"/></geometry>
+    </collision>
+    <!-- finger, pointing +Y; 2.5 cm tall, z = -0.044 .. -0.069 below spindle axis, inner face at link x = 0 -->
+    <visual>
+      <origin xyz="0.015 0.095 -0.0565"/>
+      <geometry><box size="0.03 0.08 0.025"/></geometry>
+      <material name="black"/>
+    </visual>
+    <collision>
+      <origin xyz="0.015 0.095 -0.0565"/>
+      <geometry><box size="0.03 0.08 0.025"/></geometry>
+    </collision>
+    <inertial><mass value="0.1"/><inertia ixx="0.0002" iyy="0.0002" izz="0.0002" ixy="0" ixz="0" iyz="0"/></inertial>
+  </link>
+  <joint name="x1_axis" type="prismatic">
+    <parent link="x_gantry"/><child link="right_jaw"/>
+    <!-- driven by X1 (right motor) -->
+    <origin xyz="0 0 0"/>
+    <axis xyz="-1 0 0"/>
+    <!-- printer X range X_MIN_POS..X_MIN_POS + X_GRIPPER_HOME_GAP through sim_to_printer.X_MAP -->
+    <limit lower="$(arg x_lower)" upper="$(arg x_upper)" effort="100" velocity="1.0"/>
+  </joint>
+</robot>

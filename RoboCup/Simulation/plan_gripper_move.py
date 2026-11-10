@@ -16,14 +16,13 @@ along the whole path and the jaws can never cross.
 Run with the assembly_station venv, e.g.:
     ../../assembly_station/bin/python plan_gripper_move.py
     ../../assembly_station/bin/python plan_gripper_move.py \
-        --start -0.07 0.06 0.005 --goal 0.07 0.17 0.005 --gap 0.03
+        --start -0.07 0.06 0.005 --goal 0.07 0.12 0.005 --gap 0.03
     ../../assembly_station/bin/python plan_gripper_move.py --no-obstacle
 
 In the GUI: press 'r' to replay the motion, close the window to quit.
 """
 import argparse
 import math
-import os
 import random
 import time
 
@@ -31,7 +30,7 @@ import pybullet as p
 import pybullet_data
 from pybullet_planning import birrt, smooth_path
 
-URDF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vyper.urdf")
+from build_urdf import build as build_urdf
 
 STEP = 0.002            # interpolation resolution for collision checking [m]
 FINGER_TIP = (0.135, -0.0565)  # finger tip centre (y, z) in the jaw link frame (see vyper.urdf)
@@ -224,7 +223,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--start", nargs=3, type=float, default=[-0.07, 0.06, 0.005],
                     metavar=("X", "Y", "Z"), help="point A: gripper centre x, bed y, gantry z [m]")
-    ap.add_argument("--goal", nargs=3, type=float, default=[0.07, 0.17, 0.005],
+    ap.add_argument("--goal", nargs=3, type=float, default=[0.07, 0.12, 0.005],
                     metavar=("X", "Y", "Z"), help="point B: gripper centre x, bed y, gantry z [m]")
     ap.add_argument("--gap", type=float, default=0.03, help="jaw opening kept during the move [m]")
     ap.add_argument("--no-obstacle", action="store_true", help="don't place the demo block on the bed")
@@ -239,7 +238,7 @@ def main():
     p.setAdditionalSearchPath(pybullet_data.getDataPath())
     p.setGravity(0, 0, 0)
     p.loadURDF("plane.urdf")
-    robot = p.loadURDF(URDF, useFixedBase=True)
+    robot = p.loadURDF(build_urdf(), useFixedBase=True)  # joint limits = printer limits
     p.resetDebugVisualizerCamera(0.9, 45, -30, [0, 0, 0.2])
 
     obstacles = [] if args.no_obstacle else [add_bed_obstacle()]
