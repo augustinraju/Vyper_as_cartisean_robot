@@ -13,6 +13,17 @@ POSITION_RE = re.compile(
 DUAL_X_RE = re.compile(r"X1:(-?\d+\.?\d*)\s+X2:(-?\d+\.?\d*)")  # per-motor X (mm)
 RESEND_RE = re.compile(r"^(?:Resend|rs)[:\s]+N?(\d+)", re.IGNORECASE)
 
+# Replies after which the rest of a command batch must not run (see is_fault)
+FAULT_RE = re.compile(
+    r"endstops hit"                      # endstop hit outside homing (M120): move cut short
+    r"|^Error:"                          # firmware error (kill, homing failed, ...)
+    r"|Unknown command"                  # typo / unsupported G-code
+    r"|M606 \w+ (?:must|needs)",         # M606 rejected: X mode not changed (M606.cpp)
+)
+# Line-transport errors: repaired by retransmission ("Resend:"), not faults
+TRANSPORT_ERRORS = ("checksum mismatch", "Line Number is not Last Line Number",
+                    "No Checksum with line number", "No Line Number with checksum")
+
 
 def checksum(text: str) -> int:
     """XOR of all bytes, as Marlin expects after '*'."""
@@ -40,6 +51,11 @@ def is_busy(text: str) -> bool:
 def is_step_count(text: str) -> bool:
     """M114 step-count line ('Count X:... '), sent on every poll."""
     return text.startswith("Count ")
+
+
+def is_fault(text: str) -> bool:
+    """A reply after which the remaining lines of the batch must be dropped."""
+    return bool(FAULT_RE.search(text)) and not any(e in text for e in TRANSPORT_ERRORS)
 
 
 def parse_resend(text: str) -> int | None:

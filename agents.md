@@ -120,6 +120,11 @@
 - `run_gui.py`: PyBullet GUI with joint sliders, a Lego stack on the bed, and a "Plan & move to goal" action.
 - `plan_gripper_move.py`: collision-free moves with `pybullet_planning` (`birrt` + `smooth_path`) in (x, y, z) with a fixed gripper gap (M606 S0 style). Run with the `assembly_station` venv, e.g. `../../assembly_station/bin/python plan_gripper_move.py`.
 
+## Sim -> printer translation (`RoboCup/Translation/sim_to_printer.py`)
+- Coordinate transforms only (no pybullet, no serial). Per axis: `printer_mm = sign * 1000 * sim_m + offset_mm`, checked against the firmware limits (X 0..181 per jaw, gap >= `X_GRIPPER_MIN_GAP` 2, Y -125..130, Z 30..255).
+- `SimToPrinter.conf_to_printer((x, y, z), gap)` / `joints_to_printer(x1, x2, y, z)` / `path_to_printer(path, gap)` -> `PrinterPose(x, y, z, gap)` (x = jaw midpoint, `.x1`/`.x2`, `.axes()` for `commands.goto`). Reverse: `printer_to_joints`, `printer_to_conf`.
+- Default offsets are uncalibrated guesses: sim X 0 = midpoint of the X switches (90.5 mm), sim Y 0 = 127.5 mm, sim Z 0 = `Z_MIN_POS` 30 mm, all signs +1. Calibrate on the machine.
+
 ## Testing Notes
 - GUI setup: `pip install pyserial`, then `python Controller/printer_control_gui.py`. The GUI runs on the host only.
 - Verify with `G1 Z5 F300` (Z motors only, including ZR) and `G1 X5 F1200` (both X motors same direction).

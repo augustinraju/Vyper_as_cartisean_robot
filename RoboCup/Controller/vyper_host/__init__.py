@@ -16,7 +16,7 @@ Non-GUI use:
     link.send_lines(commands.home("Y"))
 """
 
-from . import commands, protocol
+from ...Controller.vyper_host import commands, protocol
 from .connection import PrinterConnection, available_ports
 
 __all__ = ["PrinterConnection", "available_ports", "commands", "protocol"]

@@ -5,6 +5,8 @@ Messages posted to rx_queue (consumed by the GUI or any other host):
   * ("pos", x, y, z)         -> M114 position report
   * ("dualx", x1, x2)        -> M114 per-motor X line
   * ("lost", ser, error_str) -> port failed (e.g. USB unplugged); threads stopped
+  * ("fault", text)          -> endstop hit / firmware error (protocol.is_fault); every
+                                line queued before it and not yet sent is dropped
 """
 
 from __future__ import annotations
@@ -53,6 +55,8 @@ class PrinterConnection:
         self._pending = 0
         self._pending_fg = 0
         self._last_rx = 0.0  # time of the last "busy:" keepalive
+        # Bumped on every fault; queued lines from an older epoch are dropped unsent
+        self._epoch = 0
         # Drain after a timeout (see _drain): replies are discarded until the marker returns
         self._drain_seq = 0
         self._drain_token = None
@@ -126,7 +130,8 @@ class PrinterConnection:
             self._pending += 1
             if not background:
                 self._pending_fg += 1
-        self._tx_queue.put((line, log, background))
+            epoch = self._epoch
+        self._tx_queue.put((line, log, background, epoch))
 
     def send_lines(self, lines: Iterable[str], log: bool = True) -> None:
         """Queue several lines; all are checked first, so none are queued on error."""
@@ -264,8 +269,16 @@ class PrinterConnection:
         self._resync(ser, stop, n)
         while not stop.is_set():
             try:
-                line, log, background = self._tx_queue.get(timeout=0.2)
+                line, log, background, epoch = self._tx_queue.get(timeout=0.2)
             except queue.Empty:
+                continue
+            with self._lock:
+                stale = epoch != self._epoch
+            if stale:
+                # Queued before a fault (endstop hit / error): the batch is aborted
+                if log:
+                    self.rx_queue.put(f"!! Dropped after fault: {line}")
+                self._line_done(background)
                 continue
             if not line.isascii():
                 # send() rejects these already; never let one kill this thread
@@ -324,6 +337,12 @@ class PrinterConnection:
         if resend is not None:
             with self._lock:
                 self._resend = resend  # acted on when the "ok" follows
+            return
+        if protocol.is_fault(text):
+            with self._lock:
+                self._epoch += 1  # writer drops everything queued so far
+            self.rx_queue.put(f"<< {text}")
+            self.rx_queue.put(("fault", text))
             return
         if protocol.is_busy(text):
             self._last_rx = time.monotonic()  # Marlin is alive, just still working

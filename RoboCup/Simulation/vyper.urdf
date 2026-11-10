@@ -9,11 +9,16 @@
       ├─ frame      (fixed)     : two vertical uprights + top bar, bolted to the base
       ├─ bed        (y_axis)    : heated bed slides front/back on the base
       └─ x_gantry   (z_axis)    : X beam rides up/down the fixed uprights (dual Z lead screws)
-           ├─ left_jaw  (x1_axis) : driven by X1 motor via the X spindle
-           └─ right_jaw (x2_axis) : driven by X2 motor (mirrored) via the X spindle
+           ├─ left_jaw  (x2_axis) : driven by X2 motor (mirrored) via the X spindle
+           └─ right_jaw (x1_axis) : driven by X1 motor via the X spindle
+  Names match the printer: X1 homes to printer X min, which is on the sim's +X (right)
+  side, so printer X runs along world -X. Both X joints therefore use axis -X: a
+  positive joint value moves the jaw toward world -X, and joint values increase in
+  the same direction as printer X (see Translation/sim_to_printer.py).
 
   Gripper = the two jaws; fingers point along +Y. Each jaw travels from its motor
-  up to the other jaw. Jaws must not cross: x1_axis <= x2_axis (enforced in run_gui.py).
+  up to the other jaw. The X1 (right) jaw stays between the X2 jaw and world +X, so
+  jaws must not cross: x1_axis <= x2_axis (enforced in simulation_gui.py).
   Zero pose: jaws closed at beam centre.
   Each jaw: nut block on the spindle -> connector hanging down -> 2.5 cm finger.
   X-motor top to finger bottom = 9 cm.
@@ -145,35 +150,35 @@
   <link name="x_gantry">
     <!-- X beam -->
     <visual>
-      <origin xyz="0 0.035 -0.017"/>
-      <geometry><box size="0.35 0.07 0.09"/></geometry>
+      <origin xyz="0 0.03 -0.017"/>
+      <geometry><box size="0.35 0.02 0.074"/></geometry>
       <material name="orange"/>
     </visual>
     <collision>
-      <origin xyz="0 0.035 -0.017"/>
-      <geometry><box size="0.35 0.07 0.09"/></geometry>
+      <origin xyz="0 0.03 -0.017"/>
+      <geometry><box size="0.35 0.02 0.074"/></geometry>
     </collision>
     <!-- left Z carriage: wraps the left pillar (x = -0.1565) and its Z lead screw behind it (y = -0.035), reaches forward to the beam -->
     <visual>
       <origin xyz="-0.1565 -0.0125 -0.017"/>
-      <geometry><box size="0.05 0.065 0.09"/></geometry>
+      <geometry><box size="0.05 0.065 0.074"/></geometry>
       <material name="orange"/>
     </visual>
     <collision>
       <origin xyz="-0.1565 -0.0125 -0.017"/>
-      <geometry><box size="0.05 0.065 0.09"/></geometry>
+      <geometry><box size="0.05 0.065 0.074"/></geometry>
     </collision>
     <!-- right Z carriage: wraps the right pillar (x = 0.1565) and its Z lead screw -->
     <visual>
       <origin xyz="0.1565 -0.0125 -0.017"/>
-      <geometry><box size="0.05 0.065 0.09"/></geometry>
+      <geometry><box size="0.05 0.065 0.074"/></geometry>
       <material name="orange"/>
     </visual>
     <collision>
       <origin xyz="0.1565 -0.0125 -0.017"/>
-      <geometry><box size="0.05 0.065 0.09"/></geometry>
+      <geometry><box size="0.05 0.065 0.074"/></geometry>
     </collision>
-    <!-- X1 motor: left side, shaft facing inward -->
+    <!-- X2 motor: left side, mirrored, shaft facing inward -->
     <visual>
       <origin xyz="-0.1565 0.06 0"/>
       <geometry><box size="0.042 0.042 0.042"/></geometry>
@@ -183,7 +188,7 @@
       <origin xyz="-0.1565 0.06 0"/>
       <geometry><box size="0.042 0.042 0.042"/></geometry>
     </collision>
-    <!-- X2 motor: right side, mirrored, shaft facing inward -->
+    <!-- X1 motor: right side, shaft facing inward -->
     <visual>
       <origin xyz="0.1565 0.06 0"/>
       <geometry><box size="0.042 0.042 0.042"/></geometry>
@@ -217,9 +222,10 @@
        Each jaw = nut block on the spindle + connector + a finger pointing along +Y.
          X1 + X2 together (M606 S0) -> closed gripper translates along X
          X1 or X2 alone  (M606 S1)  -> jaws open / close
-       Joint value = jaw inner-face position on X. Both 0 = jaws touching at beam centre.
-       Gap = x2_axis - x1_axis >= 0. The no-crossing rule (left jaw stops at right jaw
-       and vice versa) is enforced by the controller (run_gui.py). -->
+       Joint value = jaw inner-face position along -X (world x = -joint). Both 0 = jaws
+       touching at beam centre.
+       Gap = x2_axis - x1_axis >= 0 (= world x of right jaw minus left jaw). The no-crossing rule
+       (left jaw stops at right jaw and vice versa) is enforced by simulation_gui.py. -->
   <link name="left_jaw">
     <!-- nut block riding the spindle -->
     <visual>
@@ -263,11 +269,11 @@
     </collision>
     <inertial><mass value="0.1"/><inertia ixx="0.0002" iyy="0.0002" izz="0.0002" ixy="0" ixz="0" iyz="0"/></inertial>
   </link>
-  <joint name="x1_axis" type="prismatic">
+  <joint name="x2_axis" type="prismatic">
     <parent link="x_gantry"/><child link="left_jaw"/>
-    <!-- driven by X1 (left motor) -->
+    <!-- driven by X2 (left motor) -->
     <origin xyz="0 0 0"/>
-    <axis xyz="1 0 0"/>
+    <axis xyz="-1 0 0"/>
     <limit lower="-0.1055" upper="0.1055" effort="100" velocity="1.0"/>
   </joint>
 
@@ -314,11 +320,11 @@
     </collision>
     <inertial><mass value="0.1"/><inertia ixx="0.0002" iyy="0.0002" izz="0.0002" ixy="0" ixz="0" iyz="0"/></inertial>
   </link>
-  <joint name="x2_axis" type="prismatic">
+  <joint name="x1_axis" type="prismatic">
     <parent link="x_gantry"/><child link="right_jaw"/>
-    <!-- driven by X2 (right motor) -->
+    <!-- driven by X1 (right motor) -->
     <origin xyz="0 0 0"/>
-    <axis xyz="1 0 0"/>
+    <axis xyz="-1 0 0"/>
     <limit lower="-0.1055" upper="0.1055" effort="100" velocity="1.0"/>
   </joint>
 </robot>

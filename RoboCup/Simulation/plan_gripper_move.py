@@ -4,7 +4,9 @@ Uses pybullet_planning's bidirectional RRT (birrt) + path smoothing over a coupl
 3-D configuration space instead of the raw joints:
 
     conf = (x, y, z)
-      x : gripper centre on the X beam   -> x1_axis = x - gap/2, x2_axis = x + gap/2
+      x : gripper centre, joint value    -> right jaw (x1_axis) = x - gap/2,
+          (X joints point along world -X)   left jaw  (x2_axis) = x + gap/2
+                                            world x of the centre = -x
       y : bed position (y_axis)          -> the bed moves, not the gripper
       z : gantry height (z_axis)
 
@@ -44,15 +46,19 @@ class GripperPlanner:
         self.cid = client
         j = {p.getJointInfo(robot, i, physicsClientId=client)[1].decode(): i
              for i in range(p.getNumJoints(robot, physicsClientId=client))}
-        self.jx1, self.jx2, self.jy, self.jz = j["x1_axis"], j["x2_axis"], j["y_axis"], j["z_axis"]
+        # Jaws by side (names follow the printer: X1 = right jaw, X2 = left jaw)
+        self.jleft, self.jright = j["x2_axis"], j["x1_axis"]
+        # Jaws by joint value: the X joints point along world -X, so x1 <= x2
+        self.jlo, self.jhi = self.jright, self.jleft
+        self.jy, self.jz = j["y_axis"], j["z_axis"]
         # child link index == joint index in PyBullet
         self.bed, self.gantry = self.jy, self.jz
-        self.left_jaw, self.right_jaw = self.jx1, self.jx2
+        self.left_jaw, self.right_jaw = self.jleft, self.jright
         self.frame = j["frame_mount"]
         self.base = -1
 
         lim = lambda i: p.getJointInfo(robot, i, physicsClientId=client)[8:10]
-        x_lo, x_hi = lim(self.jx1)
+        x_lo, x_hi = lim(self.jlo)
         self.lower = (x_lo + gap / 2, *lim(self.jy)[:1], lim(self.jz)[0])
         self.upper = (x_hi - gap / 2, lim(self.jy)[1], lim(self.jz)[1])
         if self.lower[0] > self.upper[0]:
@@ -72,7 +78,7 @@ class GripperPlanner:
     # ---- configuration handling -------------------------------------------------
     def set_conf(self, q):
         x, y, z = q
-        for joint, val in ((self.jx1, x - self.gap / 2), (self.jx2, x + self.gap / 2),
+        for joint, val in ((self.jlo, x - self.gap / 2), (self.jhi, x + self.gap / 2),
                            (self.jy, y), (self.jz, z)):
             p.resetJointState(self.robot, joint, val, physicsClientId=self.cid)
         update_bed_obstacles(self.robot, self.bed, self.obstacles, self.cid)
@@ -94,6 +100,27 @@ class GripperPlanner:
                 if p.getClosestPoints(self.robot, body, 0.0, l, -1, physicsClientId=self.cid):
                     hits.append((name(l), f"obstacle#{body}"))
         return hits
+
+    def opening_collisions(self, q, new_gap):
+        """Collisions that appear while opening from self.gap to new_gap at conf q.
+
+        The opening is stepped every STEP. Contacts already present at the current gap
+        are ignored, so a jaw touching something can still move away from it. Closing
+        (new_gap <= self.gap) is not checked and returns []."""
+        if new_gap <= self.gap:
+            return []
+        old = self.gap
+        try:
+            before = set(self.colliding_pairs(q))
+            n = max(1, math.ceil((new_gap - old) / STEP))
+            for i in range(1, n + 1):
+                self.gap = old + (new_gap - old) * i / n
+                hits = [h for h in self.colliding_pairs(q) if h not in before]
+                if hits:
+                    return hits
+            return []
+        finally:
+            self.gap = old
 
     # ---- functions handed to pybullet_planning -----------------------------------
     def collision_fn(self, q, diagnosis=False, **kwargs):
@@ -148,8 +175,10 @@ class GripperPlanner:
         """Gripper tip centre expressed in the bed link frame (bed frame is axis-aligned)."""
         self.set_conf(q)
         jaw = p.getLinkState(self.robot, self.left_jaw, physicsClientId=self.cid)[4]
+        jaw_r = p.getLinkState(self.robot, self.right_jaw, physicsClientId=self.cid)[4]
         bed = p.getLinkState(self.robot, self.bed, physicsClientId=self.cid)[4]
-        tip = (jaw[0] + self.gap / 2, jaw[1] + FINGER_TIP[0], jaw[2] + FINGER_TIP[1])
+        # world midpoint of the two inner faces (independent of the X joint direction)
+        tip = ((jaw[0] + jaw_r[0]) / 2, jaw[1] + FINGER_TIP[0], jaw[2] + FINGER_TIP[1])
         return tuple(t - b for t, b in zip(tip, bed))
 
 

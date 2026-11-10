@@ -10,7 +10,7 @@ Usage:
 The code lives in the vyper_host package next to this file.
 """
 
-from vyper_host.app import main
+from RoboCup.Controller.vyper_host.app import main
 
 if __name__ == "__main__":
     main()

@@ -201,6 +201,8 @@ class App(tk.Tk):
                 messagebox.showerror("Connection lost",
                                      f"The serial port stopped working:\n{error}\n\n"
                                      "Check the USB cable, then connect again.")
+        elif kind == "fault":  # ("fault", text): rest of the batch dropped by the connection
+            self.log_line("!! Printer fault, remaining commands of this batch dropped")
         elif kind == "pos":  # ("pos", x, y, z): only Y and Z, X comes from dualx
             self.pos_panel.show_yz(*values[1:])
         elif kind == "dualx":  # ("dualx", x1, x2)
